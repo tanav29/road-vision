@@ -1,6 +1,6 @@
-# 🚗 Advanced Driver Assistance System (ADAS)
+ # 🚗 Advanced Driver Assistance System (ADAS)
 
-A comprehensive real-time driver assistance system that combines **YOLOv5 object detection** with **computer vision-based lane detection** to provide intelligent driving assistance and safety alerts.
+ A comprehensive real-time driver assistance system that combines **YOLOv8 object detection** with **computer vision-based lane detection** to provide intelligent driving assistance and safety alerts.
 
 ![ADAS Preview](https://github.com/user-attachments/assets/c15a9601-6340-4369-bdbb-969ba44f9aa7)
 
@@ -15,9 +15,9 @@ This ADAS system provides real-time monitoring and assistance for drivers by det
 
 ## ✨ Key Features
 
-### 🎯 Object Detection & Classification
+ ### 🎯 Object Detection & Classification
 
-- **YOLOv5 Model**: Pre-trained on car camera photos dataset
+ - **YOLOv8 Model**: Trained on car camera photos dataset in Google Colab
 - **Multi-class Detection**: Cars, pedestrians, traffic signs, and more
 - **Real-time Processing**: 30+ FPS on standard hardware
 - **Confidence-based Filtering**: Adjustable detection thresholds
@@ -48,7 +48,7 @@ This ADAS system provides real-time monitoring and assistance for drivers by det
 
 - **Python 3.8+**: Primary programming language
 - **OpenCV 4.x**: Computer vision and image processing
-- **Ultralytics YOLOv5**: State-of-the-art object detection
+ - **Ultralytics YOLOv8**: State-of-the-art object detection
 - **NumPy**: Numerical computing and array operations
 
 ### Computer Vision
@@ -64,17 +64,37 @@ This ADAS system provides real-time monitoring and assistance for drivers by det
 - **OpenCV GUI**: Real-time video display
 - **Threading**: Non-blocking audio playback
 
-### Data Processing
+ ### Data Processing
+ - **Pandas**: Data manipulation and analysis
+ - **Matplotlib**: Visualization and plotting
+ - **Plotly**: Interactive data visualization
 
-- **Pandas**: Data manipulation and analysis
-- **Matplotlib**: Visualization and plotting
-- **Plotly**: Interactive data visualization
+ ## 🧠 Model Training
 
-## 📁 Project Structure
+ The YOLOv8 model was trained using Google Colab for its free GPU resources. The training process involved:
+
+ - **Dataset**: Car camera photos with annotated objects (cars, pedestrians, traffic signs)
+ - **Environment**: Google Colab with CUDA-enabled GPU
+ - **Framework**: Ultralytics YOLOv8
+ - **Training Script**: Available in `model.ipynb`
+
+ ### Challenges and Difficulties
+
+ Training the YOLOv8 model in Google Colab presented several challenges:
+
+ - **Session Timeouts**: Colab's 12-hour session limit required careful checkpointing and resuming training
+ - **GPU Availability**: Limited free GPU time necessitated efficient training schedules
+ - **Data Upload**: Large datasets required uploading to Google Drive or using cloud storage
+ - **Memory Constraints**: Balancing batch size with Colab's RAM limitations
+ - **Model Optimization**: Tuning hyperparameters for real-time performance on edge devices
+ - **Integration**: Ensuring the trained model integrates seamlessly with the lane detection and alert systems
+ - **Data Quality**: Collecting and annotating diverse driving scenarios for robust detection
+
+ ## 📁 Project Structure
 
 ```
 adas/
-├── model.pt                 # Trained YOLOv5 model
+ ├── model.pt                 # Trained YOLOv8 model
 ├── model.ipynb             # Model training notebook
 ├── README.md               # Project documentation
 ├── sounds/
@@ -167,7 +187,7 @@ python frames.py
 
 1. **Frame Capture**: Real-time video input
 2. **Preprocessing**: Resize and normalize
-3. **YOLOv5 Inference**: Object detection and classification
+ 3. **YOLOv8 Inference**: Object detection and classification
 4. **Post-processing**: Confidence filtering and NMS
 5. **Visualization**: Bounding boxes and labels
 
@@ -203,7 +223,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **Ultralytics**: YOLOv5 implementation
+ - **Ultralytics**: YOLOv8 implementation
 - **OpenCV**: Computer vision library
 - **Kaggle Dataset**: Car camera photos for training
 - **Research Community**: Computer vision and ADAS research

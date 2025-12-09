@@ -4,11 +4,11 @@ import threading
 import numpy as np
 from ultralytics import YOLO
 from lane import detect_lanes
-from playsound import playsound
+# from playsound import playsound
 
 model = YOLO("../model.pt")
 
-cap = cv2.VideoCapture("./videos/lane1.mp4")
+cap = cv2.VideoCapture("./videos/dashcam3.mp4")
 
 last_beep_time = 0
 
@@ -66,9 +66,9 @@ while True:
                     (0, 0, 255),
                     3,
                 )
-                if time.time() - last_beep_time > 1:
-                    threading.Thread(target=beep, daemon=True).start()
-                    last_beep_time = time.time()
+                # if time.time() - last_beep_time > 1:
+                #     threading.Thread(target=beep, daemon=True).start()
+                #     last_beep_time = time.time()
             elif class_name == "person" and box_area > threshold * 3:
                 cv2.putText(
                     annotated_frame,
@@ -79,9 +79,9 @@ while True:
                     (0, 0, 255),
                     3,
                 )
-                if time.time() - last_beep_time > 1:
-                    threading.Thread(target=beep, daemon=True).start()
-                    last_beep_time = time.time()
+                # if time.time() - last_beep_time > 1:
+                #     threading.Thread(target=beep, daemon=True).start()
+                #     last_beep_time = time.time()
 
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), get_color(class_id), 2)
             label = f"{class_name}"
