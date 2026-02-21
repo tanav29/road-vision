@@ -4,7 +4,7 @@ import time
 import numpy as np
 from ultralytics import YOLO
 
-model = YOLO("../model.pt")
+model = YOLO("model.pt")
 
 # Real-time processing with overlay info
 image_files = sorted(glob.glob("../car-camera-photos/images/images/*.jpg"))

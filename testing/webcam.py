@@ -1,20 +1,21 @@
 import cv2
 import time
-import threading
+
+# import threading
 import numpy as np
 from ultralytics import YOLO
 from lane import detect_lanes
 # from playsound import playsound
 
-model = YOLO("../model.pt")
+model = YOLO("model.pt")
 
 cap = cv2.VideoCapture("./videos/dashcam3.mp4")
 
 last_beep_time = 0
 
 
-def beep():
-    playsound("../sounds/warning.mp3")
+# def beep():
+#     playsound("../sounds/warning.mp3")
 
 
 def get_color(class_id):
