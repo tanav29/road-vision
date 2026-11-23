@@ -116,7 +116,7 @@ def draw_lines(img, lines, color=[255, 0, 0], thickness=10):
             cv2.line(img, (x1, y1), (x2, y2), color, thickness)
 
 
-def game_lane(frame):
+def game_lane(frame, tracker=None):
     """Estimate lane center offset using white/yellow markings in a road trapezoid.
 
     Returns (offset, overlay), with offset None when both boundaries are not credible.
@@ -144,17 +144,48 @@ def game_lane(frame):
             xb = x1 + (bottom-y1)*dxdy
             xt = x1 + (top-y1)*dxdy
             if dxdy < 0 and -.2*w < xb < .55*w:
-                sides[0].append((xb, xt))
+                sides[0].append((xb, xt, np.hypot(x2-x1, y2-y1)))
             elif dxdy > 0 and .45*w < xb < 1.2*w:
-                sides[1].append((xb, xt))
+                sides[1].append((xb, xt, np.hypot(x2-x1, y2-y1)))
     overlay = frame.copy()
     if not all(sides):
+        if tracker is not None:
+            tracker.reset()
         return None, overlay
-    left, right = [np.median(side, axis=0) for side in sides]
+
+    def strongest_cluster(side):
+        # Group nearby segment extrapolations instead of averaging unrelated road edges.
+        candidates = np.asarray(side)
+        best = max(candidates, key=lambda candidate: candidates[
+            np.abs(candidates[:, 0] - candidate[0]) < .09*w, 2].sum())
+        group = candidates[np.abs(candidates[:, 0] - best[0]) < .09*w]
+        return np.average(group[:, :2], axis=0, weights=group[:, 2])
+
+    left, right = [strongest_cluster(side) for side in sides]
     if not (.25*w < right[0]-left[0] < 1.1*w and left[1] < right[1] and right[1]-left[1] < .65*w):
+        if tracker is not None:
+            tracker.reset()
         return None, overlay
+    if tracker is not None:
+        left, right = tracker.smooth(left, right, w)
     for xb, xt in (left, right):
         cv2.line(overlay, (int(xb), int(bottom)), (int(xt), int(top)), (0, 255, 0), 3)
     center = (left[0] + right[0]) / 2
     cv2.circle(overlay, (int(center), int(bottom)), 6, (0, 255, 255), -1)
     return (center - w/2)/(w/2), overlay
+
+
+class LaneTracker:
+    """Smooth confirmed boundaries; never carry them through a missing detection."""
+    def __init__(self):
+        self.previous = None
+
+    def reset(self):
+        self.previous = None
+
+    def smooth(self, left, right, width):
+        current = np.array([left, right], dtype=float)
+        if self.previous is not None and np.max(np.abs(current - self.previous)) < .15 * width:
+            current = .35 * current + .65 * self.previous
+        self.previous = current
+        return current

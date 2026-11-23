@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cv2
 import numpy as np
 from autodrive import Controller, decide, CTRL, ALT, ARM, STOP
-from lane import game_lane
+from lane import game_lane, LaneTracker
 
 
 class FakeKeys:
@@ -34,6 +34,16 @@ class DrivingTests(unittest.TestCase):
         offset, _ = game_lane(frame)
         self.assertIsNotNone(offset)
         self.assertLess(abs(offset), .08)
+
+    def test_lane_tracking_resets_when_markings_disappear(self):
+        tracker = LaneTracker()
+        frame = np.zeros((600, 1000, 3), np.uint8)
+        for start, end in [((130, 590), (430, 330)), ((870, 590), (570, 330))]:
+            cv2.line(frame, start, end, (255, 255, 255), 8)
+        self.assertIsNotNone(game_lane(frame, tracker)[0])
+        self.assertIsNotNone(tracker.previous)
+        self.assertIsNone(game_lane(np.zeros_like(frame), tracker)[0])
+        self.assertIsNone(tracker.previous)
 
     def test_watchdog_stop_and_release(self):
         backend = FakeKeys()

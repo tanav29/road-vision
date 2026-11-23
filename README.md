@@ -161,7 +161,8 @@ when it is already stopped.
 
 2. Select the game rectangle and press Enter. Keep the preview outside that rectangle.
    Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
-   controller state and detected lane boundaries. Both lane boundaries are required;
+   controller state and detected lane boundaries in a resizable, larger preview. The
+processing FPS shown is before the target-rate wait. Both lane boundaries are required;
    when lanes are missing or a large vehicle/person is detected ahead it applies
    short brake pulses. Steering and acceleration are also pulsed.
 3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only

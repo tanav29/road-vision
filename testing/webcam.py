@@ -6,7 +6,7 @@ import time
 # import threading
 import numpy as np
 from ultralytics import YOLO
-from lane import detect_lanes, game_lane
+from lane import detect_lanes, game_lane, LaneTracker
 from autodrive import Controller, WindowsKeys, decide
 # from playsound import playsound
 
@@ -14,8 +14,8 @@ parser = argparse.ArgumentParser(description="Run the dashcam detector on a vide
 parser.add_argument("--autodrive", action="store_true", help="Enable experimental Windows game controls (requires --screen)")
 parser.add_argument("--screen", action="store_true", help="Select an area of the primary screen to capture")
 parser.add_argument("--video", default="./videos/dashcam3.mp4", help="Video path when not using --screen")
-parser.add_argument("--fps", type=float, default=5.0, help="Maximum inference frames per second (default: 5)")
-parser.add_argument("--imgsz", type=int, default=512, help="YOLO inference image size (default: 512)")
+parser.add_argument("--fps", type=float, default=30.0, help="Maximum inference frames per second (default: 30)")
+parser.add_argument("--imgsz", type=int, default=320, help="YOLO inference image size (default: 320)")
 args = parser.parse_args()
 if args.autodrive and not args.screen:
     parser.error("--autodrive requires --screen")
@@ -66,7 +66,11 @@ def get_color(class_id):
     return tuple(int(c) for c in color)
 
 
+lane_tracker = LaneTracker()
+window_name = "Smart Dashcam System"
 try:
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    cv2.resizeWindow(window_name, 500, 500)
     while True:
         frame_started = time.monotonic()
         if screen_region is not None:
@@ -77,7 +81,7 @@ try:
                 break
 
         # Lane detection overlay
-        lane_offset, frame_with_lanes = game_lane(frame) if controller else (None, detect_lanes(frame))
+        lane_offset, frame_with_lanes = game_lane(frame, lane_tracker) if controller else (None, detect_lanes(frame))
 
         results = model(frame, conf=0.5, imgsz=args.imgsz, verbose=False)
 
@@ -161,8 +165,9 @@ try:
             cv2.putText(annotated_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                         .65, (0, 255, 255), 2)
 
-        window_name = "Smart Dashcam System"
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        elapsed = max(time.monotonic() - frame_started, 1e-6)
+        cv2.putText(annotated_frame, f"Processing: {1/elapsed:.1f} FPS (target {args.fps:g})",
+                    (10, frame.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 255, 255), 2)
         cv2.imshow(window_name, annotated_frame)
 
         if cv2.getWindowProperty("Smart Dashcam System", cv2.WND_PROP_VISIBLE) < 1:
