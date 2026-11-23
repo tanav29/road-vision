@@ -1,11 +1,11 @@
-﻿import sys
+import sys
 import time
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cv2
 import numpy as np
-from autodrive import Controller, decide, F8, F9
+from autodrive import Controller, decide, CTRL, ALT, ARM, STOP
 from lane import game_lane
 
 
@@ -39,18 +39,18 @@ class DrivingTests(unittest.TestCase):
         backend = FakeKeys()
         ctl = Controller(backend, 1, timeout=.15)
         try:
-            backend.pressed_keys.add(F8)
+            backend.pressed_keys.update({CTRL, ALT, ARM})
             time.sleep(.05)
             backend.pressed_keys.clear()
             ctl.update({'up', 'left'}, 'drive')
-            backend.pressed_keys.add(F9)
+            backend.pressed_keys.update({CTRL, ALT, STOP})
             time.sleep(.06)
             self.assertFalse(ctl.armed)
             self.assertIn(('up', False), backend.events)
             self.assertIn(('left', False), backend.events)
             backend.pressed_keys.clear()
             time.sleep(.04)
-            backend.pressed_keys.add(F8)
+            backend.pressed_keys.update({CTRL, ALT, ARM})
             time.sleep(.05)
             backend.pressed_keys.clear()
             ctl.update({'up'}, 'drive')
@@ -65,7 +65,7 @@ class DrivingTests(unittest.TestCase):
         backend = FakeKeys()
         ctl = Controller(backend, 1, timeout=.1)
         try:
-            backend.pressed_keys.add(F8)
+            backend.pressed_keys.update({CTRL, ALT, ARM})
             time.sleep(.05)
             backend.pressed_keys.clear()
             ctl.update({'up'}, 'drive')

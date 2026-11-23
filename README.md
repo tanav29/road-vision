@@ -147,10 +147,9 @@ objects. Actual frame rate can be lower than the limit if processing takes longe
 #### Experimental Vice City autonomous mode (Windows)
 
 This is an experimental game controller, **not for real vehicles**. It assumes a
-front-facing in-car view and the game's default arrow-key controls (Up accelerates,
-Down brakes/reverses, Left/Right steer). It cannot read speed, detect every obstacle,
+front-facing in-car view and the game's WASD controls (W accelerates, S brakes/reverses, A/D steer). It cannot read speed, detect every obstacle,
 or navigate intersections; the real-road-trained object model may miss game objects.
-Test in a clear area at low speed and be ready to take over. Down can reverse the car
+Test in a clear area at low speed and be ready to take over. S can reverse the car
 when it is already stopped.
 
 1. Open the browser game on the primary screen, choose the in-car view, and leave it
@@ -161,17 +160,17 @@ when it is already stopped.
    ```
 
 2. Select the game rectangle and press Enter. Keep the preview outside that rectangle.
-   Click the game to focus it, then press **F8** to arm. The preview displays the
+   Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
    controller state and detected lane boundaries. Both lane boundaries are required;
    when lanes are missing or a large vehicle/person is detected ahead it applies
    short brake pulses. Steering and acceleration are also pulsed.
-3. Press **F9 globally** to immediately disarm and release the keys. F8 re-arms only
+3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only
    while the selected game window has focus. Losing focus or an inference timeout
    also disarms and releases keys. Click the preview and press `q`, close it, or use
    Ctrl+C to exit. Stop before moving/resizing or covering the capture area; select it
    again after restarting. The watchdog depends on the Python process and Windows;
    a forcibly killed process or system failure cannot guarantee key release. If needed,
-   press and release the arrow keys manually to clear them.
+   press and release W, A, S and D manually to clear them.
 
 The controller uses screen-space heuristics rather than measured distances; missing
 markings, shadows, HUD elements, unusual roads, and false detections can cause bad

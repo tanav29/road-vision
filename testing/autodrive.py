@@ -1,10 +1,10 @@
-﻿"""Conservative, opt-in controls for a Windows browser game only."""
+"""Conservative, opt-in controls for a Windows browser game only."""
 import ctypes
 import threading
 import time
 
-KEYS = {'up': 0x26, 'down': 0x28, 'left': 0x25, 'right': 0x27}
-F8, F9 = 0x77, 0x78
+KEYS = {'up': 0x57, 'down': 0x53, 'left': 0x41, 'right': 0x44}  # W, S, A, D
+CTRL, ALT, ARM, STOP = 0x11, 0x12, 0x47, 0x58
 
 
 def decide(lane, boxes, width, height, now):
@@ -49,7 +49,7 @@ class WindowsKeys:
         return bool(self.user32.GetAsyncKeyState(key) & 0x8000)
 
     def key(self, name, down):
-        self.user32.keybd_event(KEYS[name], 0, 1 if down else 3, 0)
+        self.user32.keybd_event(KEYS[name], 0, 0 if down else 2, 0)
 
 
 class Controller:
@@ -60,7 +60,7 @@ class Controller:
         self.lock = threading.Lock()
         self.held = set()
         self.armed = False
-        self.reason = 'DISARMED: F8 to arm, F9 to stop'
+        self.reason = 'DISARMED: Ctrl+Alt+G to arm, Ctrl+Alt+X to stop'
         self.last_update = 0
         self.held_until = 0
         self.closed = False
@@ -78,25 +78,26 @@ class Controller:
         self.reason = reason
 
     def _watch(self):
-        previous_f8 = False
+        previous_arm = False
         while True:
             with self.lock:
                 if self.closed:
                     return
-                f8 = self.backend.pressed(F8)
-                if self.backend.pressed(F9):
-                    self._stop('STOPPED: F9; F8 to re-arm')
+                modifiers = self.backend.pressed(CTRL) and self.backend.pressed(ALT)
+                arm = modifiers and self.backend.pressed(ARM)
+                if modifiers and self.backend.pressed(STOP):
+                    self._stop('STOPPED: Ctrl+Alt+X; Ctrl+Alt+G to re-arm')
                 elif self.armed and self.backend.foreground() != self.game_window:
                     self._stop('STOPPED: game lost focus')
                 elif self.armed and time.monotonic() - self.last_update > self.timeout:
                     self._stop('STOPPED: detection timed out')
                 elif self.held and time.monotonic() >= self.held_until:
                     self._release()
-                elif f8 and not previous_f8 and self.backend.foreground() == self.game_window:
+                elif arm and not previous_arm and self.backend.foreground() == self.game_window:
                     self.armed = True
                     self.last_update = time.monotonic()
                     self.reason = 'ARMED: waiting for detection'
-                previous_f8 = f8
+                previous_arm = arm
             time.sleep(.02)
 
     def update(self, keys, reason):

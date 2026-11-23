@@ -50,7 +50,7 @@ if args.autodrive:
     backend = WindowsKeys()
     x1, y1, x2, y2 = screen_region
     controller = Controller(backend, backend.window_at((x1+x2)//2, (y1+y2)//2))
-    print("Experimental mode: click the game, press F8 to arm; F9 stops immediately.")
+    print("Experimental mode: click the game, press Ctrl+Alt+G to arm; Ctrl+Alt+X stops immediately.")
     print("Focus loss or a detection timeout also stops and releases all keys.")
 
 last_beep_time = 0
