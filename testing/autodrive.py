@@ -16,7 +16,7 @@ def decide(lane, boxes, width, height, now):
         if x2 > width * .35 and x1 < width * .65 and y2 > height * .55 and (x2-x1)*(y2-y1) > width*height*.012:
             return {'down'}, 'OBSTACLE: braking'
     if lane is None:
-        return {'down'}, 'LANE LOST: braking'
+        return set(), 'LANE LOST: controls released'
     # Duty cycles keep both speed and steering low without relying on vehicle speed.
     keys = {'up'} if now % 1.0 < .25 else set()
     if now % .6 < .12:
@@ -49,7 +49,27 @@ class WindowsKeys:
         return bool(self.user32.GetAsyncKeyState(key) & 0x8000)
 
     def key(self, name, down):
-        self.user32.keybd_event(KEYS[name], 0, 0 if down else 2, 0)
+        # Scan-code input is understood by more browser game engines than virtual keys.
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [('wVk', ctypes.c_ushort), ('wScan', ctypes.c_ushort),
+                        ('dwFlags', ctypes.c_ulong), ('time', ctypes.c_ulong),
+                        ('dwExtraInfo', ctypes.c_size_t)]
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [('dx', ctypes.c_long), ('dy', ctypes.c_long),
+                        ('mouseData', ctypes.c_ulong), ('dwFlags', ctypes.c_ulong),
+                        ('time', ctypes.c_ulong), ('dwExtraInfo', ctypes.c_size_t)]
+        class HARDWAREINPUT(ctypes.Structure):
+            _fields_ = [('uMsg', ctypes.c_ulong), ('wParamL', ctypes.c_ushort),
+                        ('wParamH', ctypes.c_ushort)]
+        class INPUTUNION(ctypes.Union):
+            _fields_ = [('ki', KEYBDINPUT), ('mi', MOUSEINPUT), ('hi', HARDWAREINPUT)]
+        class INPUT(ctypes.Structure):
+            _anonymous_ = ('data',)
+            _fields_ = [('type', ctypes.c_ulong), ('data', INPUTUNION)]
+        scan = self.user32.MapVirtualKeyW(KEYS[name], 0)
+        event = INPUT(type=1, ki=KEYBDINPUT(0, scan, 8 | (0 if down else 2), 0, 0))
+        if self.user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT)) != 1:
+            raise ctypes.WinError()
 
 
 class Controller:
@@ -107,6 +127,11 @@ class Controller:
             if self.backend.foreground() != self.game_window:
                 self._stop('STOPPED: game lost focus')
                 return self.reason
+            # Do not send driving keys while the arm shortcut modifiers are held.
+            if self.backend.pressed(CTRL) or self.backend.pressed(ALT):
+                self._release()
+                self.last_update = time.monotonic()
+                return 'ARMED: release Ctrl and Alt'
             for key in self.held - keys:
                 self.backend.key(key, False)
                 self.held.remove(key)

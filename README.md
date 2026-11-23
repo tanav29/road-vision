@@ -163,8 +163,9 @@ when it is already stopped.
    Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
    controller state and detected lane boundaries in a resizable, larger preview. The
 processing FPS shown is before the target-rate wait. Both lane boundaries are required;
-   when lanes are missing or a large vehicle/person is detected ahead it applies
-   short brake pulses. Steering and acceleration are also pulsed.
+   when lanes are missing it releases the driving keys. When a large vehicle/person
+   is detected ahead it applies short brake pulses. Steering and acceleration are
+   also pulsed. Release Ctrl and Alt after arming before the car can move.
 3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only
    while the selected game window has focus. Losing focus or an inference timeout
    also disarms and releases keys. Click the preview and press `q`, close it, or use
@@ -300,3 +301,9 @@ For questions, issues, or contributions:
 ---
 
 **Built with ❤️ for safer roads and smarter driving**
+
+## For vicecity demo of autodriving
+
+```bash
+.venv\Scripts\python.exe testing\webcam.py --screen --autodrive
+```

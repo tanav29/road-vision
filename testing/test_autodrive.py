@@ -21,7 +21,7 @@ class FakeKeys:
 
 class DrivingTests(unittest.TestCase):
     def test_decision_obstacle_and_missing_lane(self):
-        self.assertEqual(decide(None, [], 1000, 600, 0)[0], {'down'})
+        self.assertEqual(decide(None, [], 1000, 600, 0)[0], set())
         self.assertEqual(decide(0, [('car', 400, 300, 600, 550)], 1000, 600, 0)[0], {'down'})
         self.assertEqual(decide(.3, [], 1000, 600, 0)[0], {'up', 'right'})
         self.assertEqual(decide(-.3, [], 1000, 600, 0)[0], {'up', 'left'})
@@ -68,6 +68,21 @@ class DrivingTests(unittest.TestCase):
             time.sleep(.05)
             self.assertFalse(ctl.armed)
             self.assertFalse(ctl.held)
+        finally:
+            ctl.close()
+
+    def test_arm_modifiers_must_be_released_before_driving(self):
+        backend = FakeKeys()
+        ctl = Controller(backend, 1)
+        try:
+            backend.pressed_keys.update({CTRL, ALT, ARM})
+            time.sleep(.05)
+            self.assertTrue(ctl.armed)
+            self.assertEqual(ctl.update({'up'}, 'drive'), 'ARMED: release Ctrl and Alt')
+            self.assertEqual(backend.events, [])
+            backend.pressed_keys.clear()
+            ctl.update({'up'}, 'drive')
+            self.assertIn(('up', True), backend.events)
         finally:
             ctl.close()
 

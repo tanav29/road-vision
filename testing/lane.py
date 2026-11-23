@@ -153,19 +153,34 @@ def game_lane(frame, tracker=None):
             tracker.reset()
         return None, overlay
 
-    def strongest_cluster(side):
-        # Group nearby segment extrapolations instead of averaging unrelated road edges.
+    def clusters(side):
         candidates = np.asarray(side)
-        best = max(candidates, key=lambda candidate: candidates[
-            np.abs(candidates[:, 0] - candidate[0]) < .09*w, 2].sum())
-        group = candidates[np.abs(candidates[:, 0] - best[0]) < .09*w]
-        return np.average(group[:, :2], axis=0, weights=group[:, 2])
+        groups = []
+        for candidate in candidates:
+            group = candidates[np.abs(candidates[:, 0] - candidate[0]) < .07*w]
+            line = np.average(group[:, :2], axis=0, weights=group[:, 2])
+            groups.append((line, group[:, 2].sum()))
+        return groups
 
-    left, right = [strongest_cluster(side) for side in sides]
-    if not (.25*w < right[0]-left[0] < 1.1*w and left[1] < right[1] and right[1]-left[1] < .65*w):
+    # Choose boundaries together: independently selecting the strongest lines can
+    # combine a road edge and an unrelated marking into a fictitious lane.
+    pairs = []
+    for left, left_support in clusters(sides[0]):
+        for right, right_support in clusters(sides[1]):
+            bottom_width = right[0] - left[0]
+            top_width = right[1] - left[1]
+            if not (.25*w < bottom_width < 1.1*w and 0 < top_width < .75*bottom_width):
+                continue
+            if not (-.1*w < left[1] < 1.1*w and -.1*w < right[1] < 1.1*w):
+                continue
+            center_error = abs((left[0] + right[0])/2 - w/2) / w
+            score = (left_support + right_support) / (1 + 3*center_error)
+            pairs.append((score, left, right))
+    if not pairs:
         if tracker is not None:
             tracker.reset()
         return None, overlay
+    _, left, right = max(pairs, key=lambda pair: pair[0])
     if tracker is not None:
         left, right = tracker.smooth(left, right, w)
     for xb, xt in (left, right):
