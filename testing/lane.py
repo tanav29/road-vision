@@ -114,3 +114,47 @@ def draw_lines(img, lines, color=[255, 0, 0], thickness=10):
     for line in lines:
         for x1, y1, x2, y2 in line:
             cv2.line(img, (x1, y1), (x2, y2), color, thickness)
+
+
+def game_lane(frame):
+    """Estimate lane center offset using white/yellow markings in a road trapezoid.
+
+    Returns (offset, overlay), with offset None when both boundaries are not credible.
+    """
+    h, w = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    white = cv2.inRange(hsv, (0, 0, 175), (180, 85, 255))
+    yellow = cv2.inRange(hsv, (15, 70, 130), (40, 255, 255))
+    markings = cv2.bitwise_or(white, yellow)
+    edges = cv2.Canny(cv2.GaussianBlur(markings, (5, 5), 0), 50, 150)
+    mask = np.zeros_like(edges)
+    cv2.fillPoly(mask, [np.array([(int(.04*w), h-1), (int(.38*w), int(.55*h)),
+                                  (int(.62*w), int(.55*h)), (int(.96*w), h-1)], np.int32)], 255)
+    lines = cv2.HoughLinesP(cv2.bitwise_and(edges, mask), 1, np.pi/180,
+                            threshold=max(15, w//40), minLineLength=max(15, w//25), maxLineGap=w//20)
+    sides = [[], []]
+    bottom, top = .90*h, .62*h
+    if lines is not None:
+        for x1, y1, x2, y2 in lines.reshape(-1, 4):
+            if abs(y2-y1) < h*.025:
+                continue
+            dxdy = (x2-x1)/(y2-y1)
+            if not .2 < abs(dxdy) < 2.5:
+                continue
+            xb = x1 + (bottom-y1)*dxdy
+            xt = x1 + (top-y1)*dxdy
+            if dxdy < 0 and -.2*w < xb < .55*w:
+                sides[0].append((xb, xt))
+            elif dxdy > 0 and .45*w < xb < 1.2*w:
+                sides[1].append((xb, xt))
+    overlay = frame.copy()
+    if not all(sides):
+        return None, overlay
+    left, right = [np.median(side, axis=0) for side in sides]
+    if not (.25*w < right[0]-left[0] < 1.1*w and left[1] < right[1] and right[1]-left[1] < .65*w):
+        return None, overlay
+    for xb, xt in (left, right):
+        cv2.line(overlay, (int(xb), int(bottom)), (int(xt), int(top)), (0, 255, 0), 3)
+    center = (left[0] + right[0]) / 2
+    cv2.circle(overlay, (int(center), int(bottom)), 6, (0, 255, 255), -1)
+    return (center - w/2)/(w/2), overlay
