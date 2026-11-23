@@ -46,18 +46,17 @@ def slope_lines(image, lines):
     if lines is None:
         return image
 
-    for line in lines:
-        for x1, y1, x2, y2 in line:
-            if x1 == x2:
-                pass  # verticle line
-            else:
-                m = (y2 - y1) / (x2 - x1)
-                c = y1 - m * x1
+    # OpenCV versions return either (N, 1, 4) or (N, 4).
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
+        if x1 == x2:
+            continue
+        m = (y2 - y1) / (x2 - x1)
+        c = y1 - m * x1
 
-                if m < 0:
-                    left_lines.append((m, c))
-                elif m >= 0:  # check if > works
-                    right_lines.append((m, c))
+        if m < 0:
+            left_lines.append((m, c))
+        else:
+            right_lines.append((m, c))
 
     # Only calculate means if we have lines
     if len(left_lines) > 0:

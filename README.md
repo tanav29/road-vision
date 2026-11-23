@@ -116,6 +116,34 @@ pip install ultralytics opencv-python numpy pandas matplotlib plotly playsound
 
 ### Running the System
 
+#### Browser game screen capture
+
+1. Open the game in your browser and position it on your primary monitor.
+2. Run `run-browser-game.bat` from the project folder, or run
+   `.venv\Scripts\python.exe testing\webcam.py --screen` from the project root.
+3. Drag a rectangle around the game in the selection window, then press Enter or
+   Space. Press Esc to cancel.
+4. Keep the game visible at the same position and play as usual. Detections appear
+   in a separate OpenCV window; keep that window outside the selected game area.
+   Click the detection window and press `q` to stop. Select the area again after
+   moving or resizing the game.
+
+This captures screen pixels, so another window covering the game will also be
+captured. The model was trained on real driving images, so game graphics and
+third-person views may require tuning and can reduce accuracy. Warnings are based
+on bounding-box size, not measured distance.
+
+The detector defaults to at most 5 frames per second and a 512-pixel inference
+size to reduce resource use. To adjust them, launch from the project root, for
+example:
+
+```powershell
+.venv\Scripts\python.exe testing\webcam.py --screen --fps 3 --imgsz 416
+```
+
+Lower values generally use fewer resources, but can miss fast-moving or small
+objects. Actual frame rate can be lower than the limit if processing takes longer.
+
 #### 1. Real-time Webcam Processing
 
 ```bash
