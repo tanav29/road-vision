@@ -5,3 +5,6 @@ car-camera-photos
 __pycache__
 videos
 output
+.venv/
+/carla-0.9.16-download.zip
+/CARLA_0.9.16/

@@ -107,6 +107,54 @@ adas/
 
 ## 🚀 Quick Start
 
+### CARLA driving simulation on Windows
+
+CARLA 0.9.16 supplies a simulated forward-facing camera, an autopilot vehicle,
+and traffic for the existing object and lane detection pipeline. CARLA is a
+large download and needs a capable GPU; its documentation recommends 8 GB
+VRAM. Lower-spec hardware may need the low quality setting and may still run
+slowly or fail to start. See the [CARLA installation guide](https://carla.readthedocs.io/en/0.9.16/start_quickstart/).
+
+1. Install Python 3.12, create a virtual environment, and install the client:
+
+   ```powershell
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r requirements-carla.txt
+   ```
+
+   CARLA 0.9.16 does not support Python 3.14. The CARLA server and Python
+   client must use the same version.
+
+2. Download and extract the official Windows package (about 7.3 GiB
+   compressed and roughly 20 GB installed):
+
+   ```powershell
+   .\setup-carla.ps1
+   ```
+
+3. Start CARLA in one terminal and wait for its window to finish loading:
+
+   ```powershell
+   .\CARLA_0.9.16\CarlaUE4.exe -quality-level=Low
+   ```
+
+4. In a second terminal, start Road Vision from the repository root:
+
+   ```powershell
+   .\.venv\Scripts\python.exe testing\carla_drive.py
+   ```
+
+   The ego vehicle drives itself. Press **Q** in the Road Vision window to
+   stop and remove the vehicles and camera created by this script. Adjust
+   traffic with `--traffic 5`, or see `--help` for more options. For a short
+   non-interactive check, use `--no-display --max-frames 30 --traffic 5`.
+   CARLA uses ports 2000 and 2001 by default.
+
+The camera feed is processed using the same model and lane detector as the
+video script. The proximity warning uses bounding-box size as a heuristic,
+not a measured distance. Simulated performance does not establish real-world
+accuracy.
+
 ### Prerequisites
 
 ```bash
