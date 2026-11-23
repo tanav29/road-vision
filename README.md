@@ -307,3 +307,20 @@ For questions, issues, or contributions:
 ```bash
 .venv\Scripts\python.exe testing\webcam.py --screen --autodrive
 ```
+
+### Experimental destination map
+
+Run `.venv\Scripts\python.exe testing\navigation.py` from the project root. Select
+first the game area and then the circular minimap within it, pressing Enter after
+both selections. Keep the game visible and stationary on screen. Click the separate
+map window to place or move the red destination marker; press `q` to quit.
+
+The blue dot is an **unverified experimental position candidate**, not a reliable
+location. The matcher searches rotations and several scales, but the game minimap
+and `map.webp` use different styles and the match can be wrong. The displayed score
+is a similarity score, not a probability. Matching currently takes multiple seconds
+on some machines and can make the window temporarily unresponsive. The destination
+is not saved, and no route planning, heading estimation, or destination driving is
+implemented yet. This prototype does not send driving controls. Re-select the
+regions after restarting or moving the game. Live game examples are needed to
+calibrate and validate localization before connecting it to driving.
