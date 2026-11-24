@@ -103,7 +103,7 @@ def main():
                     class_name = model.names[class_id]
                     box_area = abs((x2 - x1) * (y2 - y1))
                     relevant = not args.autodrive or planner.intersects(
-                        (class_name, x1, y1, x2, y2), planner.bend, frame_width, frame_height)
+                        (class_name, x1, y1, x2, y2), frame_width, frame_height)
                     center_left = int(frame_width / 3) + 40
                     center_right = int(frame_width * 2 / 3) + 40
                     box_center_x = (x1 + x2) // 2

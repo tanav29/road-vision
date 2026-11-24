@@ -2,25 +2,29 @@
 import cv2
 import numpy as np
 
+from lane import game_lane, LaneTracker
+
 
 class RibbonPlanner:
-    # Bend is the lateral displacement at the far end, as a fraction of frame width.
-    bends = (0., -.12, .12, -.24, .24)
     traffic = {'car', 'truck', 'bus', 'motorcycle', 'motorbike', 'bicycle', 'person'}
     horizon = .55
 
     def __init__(self):
         self.reset()
         self.rows = np.linspace(self.horizon, 1., 32)
-        self.samples = []
-        for bend in self.bends:
-            left, right = self.limits(self.rows, bend)
-            cols = left[:, None] + (right-left)[:, None]*np.linspace(.02, .98, 24)
-            self.samples.append((np.rint(self.rows*179).astype(int)[:, None],
-                                 np.rint(cols*319).astype(int)))
+        self.sample_rows = np.rint(self.rows*179).astype(int)[:, None]
+        self.fallback_cols = {}
+        for bend in (0., -.12, .12):
+            depth = (self.rows-self.horizon)/(1-self.horizon)
+            shift = bend*(1-depth)**1.6
+            left, right = self.limits(self.rows)
+            xs = (left+shift)[:, None] + (right-left)[:, None]*np.linspace(.02, .98, 24)
+            self.fallback_cols[bend] = np.rint(xs*319).astype(int)
 
     def reset(self):
+        self.tracker = LaneTracker()
         self.bend = 0.
+        self.steering = None
         self.braking = False
         self.brake_until = 0.
         self.last_frame = None
@@ -31,20 +35,40 @@ class RibbonPlanner:
         self.reversing = False
         self.road_since = None
 
-    @classmethod
-    def limits(cls, y, bend):
-        depth = np.clip((y-cls.horizon)/(1-cls.horizon), 0., 1.)
-        center = .5 + bend*(1-depth)**1.6
+    def limits(self, y):
+        depth = np.clip((y-self.horizon)/(1-self.horizon), 0., 1.)
         half_width = .037 + .123*depth
+        if self.tracker.previous is None:
+            center = .5 + self.bend*(1-depth)**1.6
+            return center-half_width, center+half_width
+        # The tracker measures x at 90% and 62% of the 320px-wide image.
+        t = (np.maximum(y, .62)-.62)/.28
+        left, right = [(top + t*(bottom-top))/320 for bottom, top in self.tracker.previous]
+        center = (left+right)/2
+        half_width = np.minimum(half_width, (right-left)*.40)
         return center-half_width, center+half_width
 
-    def intersects(self, box, bend, width, height):
+    def intersects(self, box, width, height):
         _, x1, _, x2, y2 = box
         if y2 < self.horizon*height:
             return False
-        left, right = self.limits(y2/height, bend)
+        left, right = self.limits(y2/height)
         inset = .25*(x2-x1)
         return x1+inset < right*width and x2-inset > left*width
+
+    def facade_ahead(self, gray, different, cols):
+        """Check for an upright surface extending into the current lane."""
+        # Long upright window frames and masonry joints can remain visible even
+        # when a grey facade matches asphalt or fills the pavement reference.
+        dx = np.abs(cv2.Sobel(gray, cv2.CV_16S, 1, 0))
+        dy = np.abs(cv2.Sobel(gray, cv2.CV_16S, 0, 1))
+        upright = ((dx > 32) & (dx > 2 * dy)).astype(np.uint8)
+        upright = cv2.morphologyEx(upright, cv2.MORPH_OPEN, np.ones((13, 1), np.uint8))
+        ys = np.r_[80, 87, 94, self.sample_rows[:9, 0]][:, None]
+        xs = np.vstack((np.repeat(cols[:1], 3, axis=0), cols[:9]))
+        surface = different[ys, xs].mean(axis=1)
+        structure = upright[ys, xs].mean(axis=1)
+        return np.all(surface >= .65) or np.all(structure >= .12)
 
     @staticmethod
     def crossing_markings(gray):
@@ -97,26 +121,35 @@ class RibbonPlanner:
         self.crosswalk = self.crossing_markings(gray)
         road = gray[143:169, 146:174]
         if np.median(road) < 9 or (np.median(road) > 246 and self.crosswalk is None):
-            self.bend = 0.
+            self.steering = None
             self.braking = False
             self.crossing_clear_since = self.road_since = self.wall_since = None
             return set(), 'Road obscured'
 
-        edge = cv2.dilate(cv2.Canny(gray, 35, 95), np.ones((3, 3), np.uint8)) > 0
+        offset, _ = game_lane(small, self.tracker)
+        self.bend = 0.
+        if offset is None and self.crosswalk is None:
+            # Follow an incomplete road edge using the earlier ribbon costs.
+            # Limit corrections to the two shallow bends on unmarked pavement.
+            edges = cv2.dilate(cv2.Canny(gray, 35, 95), np.ones((3, 3), np.uint8)) > 0
+            costs = {}
+            for bend, sample_cols in self.fallback_cols.items():
+                samples = edges[self.sample_rows, sample_cols]
+                costs[bend] = (.55*samples.mean() + .45*samples.reshape(8, -1).mean(axis=1).max()
+                               + abs(bend)*.20)
+            self.bend = min(costs, key=costs.get)
+            offset = self.bend
+        left_path, right_path = self.limits(self.rows)
+        xs = left_path[:, None] + (right_path-left_path)[:, None]*np.linspace(.02, .98, 24)
+        cols = np.clip(np.rint(xs*319).astype(int), 0, 319)
         # Compare surface colour to the pavement immediately ahead. Lab chroma
         # keeps shadows less influential than kerbs, grass and road markings.
         lab = cv2.cvtColor(smooth, cv2.COLOR_BGR2LAB).astype(np.int16)
         reference = np.median(lab[143:169, 146:174], axis=(0, 1))
         delta = np.abs(lab-reference)
-        different = (delta[:, :, 1:].sum(axis=2) > 28) | (delta[:, :, 0] > 55)
-        evidence = .70*edge + .72*different
+        different = delta[:, :, 1:].sum(axis=2) > 28
         if self.crosswalk:
             left, top, right, bottom = self.crosswalk
-            region = np.s_[round(top*180):round(bottom*180), round(left*320):round(right*320)]
-            # Painted stripes are traversable. Keep chromatic obstacles and YOLO boxes.
-            paint = gray[region] > 145
-            paint = cv2.dilate(paint.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
-            evidence[region][paint & (delta[region][:, :, 1:].sum(axis=2) < 28)] = 0
 
         for box in boxes:
             if box[0].lower() not in {'person', 'pedestrian'}:
@@ -124,13 +157,13 @@ class RibbonPlanner:
             _, x1, _, x2, foot = box
             on_crossing = (self.crosswalk is not None and x2/width > left-.035
                            and x1/width < right+.035 and top-.035 <= foot/height <= bottom+.035)
-            if on_crossing or self.intersects(box, self.bend, width, height) or self.intersects(box, 0., width, height):
+            if on_crossing or self.intersects(box, width, height):
                 self.road_since = self.wall_since = None
                 if not self.yielding:
                     self.brake_until = now + .18
                 self.yielding = True
                 self.crossing_clear_since = None
-                self.bend = 0.
+                self.steering = None
                 return ({'down'} if now < self.brake_until else set()), 'Yielding to pedestrian'
 
         if self.yielding:
@@ -142,7 +175,7 @@ class RibbonPlanner:
             self.crossing_clear_since = None
         traffic = [box for box in boxes if box[0].lower() in self.traffic and
                    (box[3]-box[1])*(box[4]-box[2]) > .004*width*height]
-        urgent = any(self.intersects(box, 0., width, height) and
+        urgent = any(self.intersects(box, width, height) and
                      (box[0].lower() == 'person' or
                       (box[4] > .72*height and (box[3]-box[1])*(box[4]-box[2]) > .025*width*height))
                      for box in traffic)
@@ -151,7 +184,7 @@ class RibbonPlanner:
         self.braking = urgent
         if urgent:
             self.road_since = self.wall_since = None
-            self.bend = 0.
+            self.steering = None
             return ({'down'} if now < self.brake_until else set()), 'Obstacle ahead'
 
         # Sample across the horizon and foreground. Flat asphalt alone only
@@ -160,29 +193,31 @@ class RibbonPlanner:
         color = np.median(scene, axis=(0, 1))
         similar = np.max(np.abs(scene-color), axis=2) <= 16
         wall = similar[:13].mean() >= .85 and similar[13:].mean() >= .85
-        if wall:
+        # Plain concrete can match the road's hue. Require the light or dark
+        # surface to span the horizon and the approach, as for coloured walls.
+        facade = self.facade_ahead(gray, different | (delta[:, :, 0] > 45), cols)
+        if wall or facade:
             self.road_since = None
-            self.bend = 0.
+            self.steering = None
             if self.wall_since is None:
                 self.wall_since = now
             if now - self.wall_since >= .15:
                 self.reversing = True
             if self.reversing:
                 return {'down'}, 'Wall ahead: reversing'
-            return set(), 'Checking for wall'
+            return ({'down'} if facade else set()), 'Checking for wall'
         self.wall_since = None
 
-        choices = []
-        for bend, (rows, cols) in zip(self.bends, self.samples):
-            if any(self.intersects(box, bend, width, height) for box in traffic):
-                continue
-            samples = evidence[rows, cols]
-            # Include the worst band so a short intrusion is not averaged away.
-            cost = .55*samples.mean() + .45*np.max(samples.reshape(8, -1).mean(axis=1))
-            if cost < .46:
-                choices.append((cost + .20*abs(bend) + .12*abs(bend-self.bend), bend))
+        # Require a broad, continuous off-colour surface. Thin paint, asphalt
+        # texture and changes in brightness alone are common on clear lanes.
+        covered = different[self.sample_rows, cols].mean(axis=1) > .70
+        offroad = np.any(np.convolve(covered.astype(int), np.ones(5), 'valid') == 5)
+        traffic_ahead = any(self.intersects(box, width, height) for box in traffic)
         if self.reversing:
-            if not choices:
+            if traffic_ahead:
+                self.road_since = None
+                return set(), 'Waiting for lane to clear'
+            if offroad:
                 self.road_since = None
                 return {'down'}, 'Reversing: looking for road'
             if self.road_since is None:
@@ -191,14 +226,21 @@ class RibbonPlanner:
                 return set(), 'Checking recovered road'
             self.reversing = False
             self.road_since = None
-        if not choices:
-            self.bend = 0.
-            return set(), 'Path blocked: coasting'
-        _, self.bend = min(choices, key=lambda item: item[0])
-        if self.bend == 0:
-            return {'up'}, 'Clear path'
-        side = 'left' if self.bend < 0 else 'right'
-        return {'up', side}, f'Following ribbon: {side}'
+        if traffic_ahead:
+            self.steering = None
+            return set(), 'Waiting for traffic ahead'
+        if offroad:
+            self.steering = None
+            return set(), 'Road surface differs: coasting'
+        if offset is None or abs(offset) < .035:
+            self.steering = None
+        elif abs(offset) > .09:
+            self.steering = 'right' if offset > 0 else 'left'
+        elif (offset > 0) != (self.steering == 'right'):
+            self.steering = None
+        if self.steering:
+            return {'up', self.steering}, f'Centering in lane: {self.steering}'
+        return {'up'}, 'Holding course'
 
     def draw(self, frame, keys):
         height, width = frame.shape[:2]
@@ -206,7 +248,7 @@ class RibbonPlanner:
             left, top, right, bottom = self.crosswalk
             cv2.rectangle(frame, (int(left*width), int(top*height)),
                           (int(right*width), int(bottom*height)), (255, 200, 60), 2)
-        left, right = self.limits(self.rows, self.bend)
+        left, right = self.limits(self.rows)
         ys = np.rint(self.rows*(height-1))
         polygon = np.int32(np.vstack((np.column_stack((left*(width-1), ys)),
                                       np.column_stack((right*(width-1), ys))[::-1])))

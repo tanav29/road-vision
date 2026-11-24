@@ -367,4 +367,4 @@ work for the future.
 
 For a map-only session run `python testing/navigation.py` in the project
 environment. For detection and localization without sending game keys, use
-`python testing/webcam.py --screen --map`.
+`python testing/webcam.py --screen --autodrive`.
