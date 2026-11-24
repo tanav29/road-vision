@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--map", action="store_true", help="Show rotating minimap localization alongside screen capture")
     parser.add_argument("--screen", action="store_true", help="Select an area of the primary screen to capture")
     parser.add_argument("--video", default="./videos/dashcam3.mp4", help="Video path when not using --screen")
-    parser.add_argument("--fps", type=float, default=30.0, help="Maximum inference frames per second (default: 30)")
+    parser.add_argument("--fps", type=float, default=60.0, help="Maximum inference frames per second (default: 60)")
     parser.add_argument("--imgsz", type=int, default=320, help="YOLO inference image size (default: 320)")
     args = parser.parse_args()
     if args.map_image:
@@ -70,6 +70,7 @@ def main():
             map_preview = MapPreview(screenshot[y:y+height, x:x+width], args.map_image or MAP_PATH)
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(window_name, 500, 500)
+        previous_start = None
         while True:
             frame_started = time.monotonic()
             if screen_region is not None:
@@ -169,8 +170,10 @@ def main():
                 cv2.putText(annotated_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                             .65, (0, 255, 255), 2)
 
-            elapsed = max(time.monotonic() - frame_started, 1e-6)
-            cv2.putText(annotated_frame, f"Processing: {1/elapsed:.1f} FPS (target {args.fps:g})",
+            fps = (f"{1 / max(frame_started - previous_start, 1e-6):.1f}"
+                   if previous_start is not None else "...")
+            previous_start = frame_started
+            cv2.putText(annotated_frame, f"Detection: {fps} FPS (target {args.fps:g})",
                         (10, frame.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 255, 255), 2)
             cv2.imshow(window_name, annotated_frame)
 

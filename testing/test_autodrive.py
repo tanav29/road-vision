@@ -92,6 +92,26 @@ class DrivingTests(unittest.TestCase):
         self.assertIsNone(planner.side)
         self.assertEqual(planner.decide(0., [], 1000, 600, .4, {})[0], {'up'})
 
+    def test_cruise_releases_throttle_while_steering(self):
+        backend = FakeKeys()
+        ctl = Controller(backend, 1)
+        try:
+            with ctl.lock:
+                ctl.armed = True
+                ctl.last_update = time.monotonic()
+            ctl.update({'up', 'left'}, 'drive')
+            time.sleep(.16)
+            ctl.update({'up', 'left'}, 'drive')
+            self.assertEqual(ctl.held, {'left'})
+            self.assertIn(('up', False), backend.events)
+            time.sleep(.25)
+            ctl.update({'up', 'left'}, 'drive')
+            self.assertEqual(ctl.held, {'up', 'left'})
+            ctl.update({'down'}, 'wall')
+            self.assertEqual(ctl.held, {'down'})
+        finally:
+            ctl.close()
+
     def test_watchdog_stop_and_release(self):
         backend = FakeKeys()
         ctl = Controller(backend, 1, timeout=.15)

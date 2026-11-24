@@ -116,6 +116,38 @@ pip install ultralytics opencv-python numpy pandas matplotlib plotly playsound
 
 ### Running the System
 
+#### Vice City AutoDrive crosswalks
+
+Run `.venv\Scripts\python.exe testing\webcam.py --screen --autodrive`, select
+the game view, focus Vice City and press Ctrl+Alt+G to arm. The preview outlines
+detected zebra crossings. A detected pedestrian on a crossing or in the driving
+path triggers a brief S brake pulse and releases throttle and steering. AutoDrive
+waits for 0.8 seconds of clear observations before selecting a path again.
+Ctrl+Alt+X disarms it. AutoDrive pulses W for 120 ms every 400 ms to cruise slowly. A persistent,
+near-uniform view triggers reverse until a traversable road ribbon reappears.
+The screen-based planner has no vehicle-speed telemetry.
+
+#### Standalone crosswalk simulation
+
+Run `python testing/crosswalk.py` from the project root with Python 3.8+.
+It runs a pedestrian crossing, an empty crossing, and a crossing with a parked
+van obscuring the approaching pedestrian. Add `--animate` for a terminal replay.
+
+```sh
+python testing/crosswalk.py --scenario van --speed 8 --delay 0.2 --animate
+python testing/crosswalk.py --scenario van --speed 12 --delay 1
+```
+
+Speed is in metres per second and sensor delay is in seconds, rounded up to
+the next 50 ms simulation tick. The event log gives time, speed, and the car's
+front position relative to the near edge of the crossing (negative is upstream).
+The controller receives delayed synthetic visibility observations. It aims to
+stop two metres before the crossing and accelerates again after observing
+clearance. The simulation checks occupancy and collisions against the actual
+pedestrian position. A failed run exits with code 1. This experiment models a
+single straight lane with fixed braking and runs independently of YOLO and the
+browser game's keyboard controls.
+
 #### Browser game screen capture
 
 1. Open the game in your browser and position it on your primary monitor.
@@ -133,7 +165,7 @@ captured. The model was trained on real driving images, so game graphics and
 third-person views may require tuning and can reduce accuracy. Warnings are based
 on bounding-box size, not measured distance.
 
-The detector defaults to at most 30 frames per second and a 320-pixel inference
+The detector defaults to at most 60 frames per second and a 320-pixel inference
 size to reduce resource use. To adjust them, launch from the project root, for
 example:
 

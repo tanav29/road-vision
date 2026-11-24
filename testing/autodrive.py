@@ -186,12 +186,15 @@ class Controller:
         self.armed = False
         self.reason = 'DISARMED: Ctrl+Alt+G to arm, Ctrl+Alt+X to stop'
         self.last_update = 0
+        self.throttle_start = None
+        self.throttle_until = 0
         self.held_until = 0
         self.closed = False
         self.thread = threading.Thread(target=self._watch, daemon=True)
         self.thread.start()
 
     def _release(self):
+        self.throttle_start = None
         for key in tuple(self.held):
             self.backend.key(key, False)
             self.held.remove(key)
@@ -217,6 +220,9 @@ class Controller:
                     self._stop('STOPPED: detection timed out')
                 elif self.held and time.monotonic() >= self.held_until:
                     self._release()
+                elif 'up' in self.held and time.monotonic() >= self.throttle_until:
+                    self.backend.key('up', False)
+                    self.held.remove('up')
                 elif arm and not previous_arm:
                     target = (self.backend.capture_target(self.capture_point)
                               if self.capture_point is not None else self.game_window)
@@ -242,6 +248,18 @@ class Controller:
                 self._release()
                 self.last_update = time.monotonic()
                 return 'ARMED: release Ctrl and Alt'
+            # Cruise using short W taps. The watchdog ends each tap even
+            # when the next detection takes longer than the pulse.
+            now = time.monotonic()
+            if 'up' in keys:
+                if self.throttle_start is None:
+                    self.throttle_start = now
+                phase = (now - self.throttle_start) % .4
+                self.throttle_until = now + .12 - phase
+                if phase >= .12:
+                    keys = keys - {'up'}
+            else:
+                self.throttle_start = None
             for key in self.held - keys:
                 self.backend.key(key, False)
                 self.held.remove(key)

@@ -49,3 +49,51 @@ class RibbonTests(unittest.TestCase):
         self.assertFalse(self.planner.decide(np.zeros_like(self.frame), [], 0)[0])
         self.frame[225:295] = (25, 170, 30)
         self.assertFalse(self.planner.decide(self.frame, [], .1)[0])
+
+    def test_crosswalk_sequence_in_game_planner(self):
+        for x in range(180, 470, 36):
+            cv2.rectangle(self.frame, (x, 268), (x+14, 295), (235, 235, 235), -1)
+        self.assertEqual(self.planner.decide(self.frame, [], 0)[0], {'up'})
+        self.assertIsNotNone(self.planner.crosswalk)
+        walker = ('person', 220, 244, 232, 284)
+        self.assertFalse(self.planner.intersects(walker, 0, 640, 400))
+        self.assertEqual(self.planner.decide(self.frame, [walker], .1)[0], {'down'})
+        self.assertEqual(self.planner.decide(self.frame, [], .3)[0], set())
+        self.assertEqual(self.planner.decide(self.frame, [walker], .5)[0], set())
+        for tick in (.6, 1., 1.3):
+            self.assertEqual(self.planner.decide(self.frame, [], tick)[0], set())
+        self.assertEqual(self.planner.decide(self.frame, [], 1.45)[0], {'up'})
+
+    def test_stale_and_obscured_frames_do_not_clear_pedestrian_hold(self):
+        walker = ('person', 315, 224, 325, 254)
+        self.assertEqual(self.planner.decide(self.frame, [walker], 0)[0], {'down'})
+        self.assertEqual(self.planner.decide(self.frame, [], 1)[0], set())
+        self.assertEqual(self.planner.decide(np.zeros_like(self.frame), [], 1.4)[0], set())
+        self.assertEqual(self.planner.decide(self.frame, [], 1.9)[0], set())
+        self.assertEqual(self.planner.decide(self.frame, [], 2.4)[0], set())
+        self.assertEqual(self.planner.decide(self.frame, [], 2.75)[0], {'up'})
+
+    def test_wall_recovery_needs_a_traversable_road(self):
+        wall = np.full_like(self.frame, (80, 110, 145))
+        cv2.rectangle(wall, (12, 350), (60, 390), (255, 255, 255), -1)
+        def keys(frame, t, boxes=()):
+            return self.planner.decide(frame, boxes, t)[0]
+        self.assertEqual(keys(wall, 0), set())
+        self.assertEqual(keys(wall, .16), {'down'})
+        self.assertEqual(keys(wall, .45), {'down'})
+        blocked = self.frame.copy()
+        blocked[225:295] = (25, 170, 30)
+        self.assertEqual(keys(blocked, .6), {'down'})
+        self.assertEqual(keys(self.frame, .7), set())
+        self.assertEqual(keys(wall, .8), {'down'})
+        self.assertEqual(keys(self.frame, .9), set())
+        self.assertEqual(keys(self.frame, 1.12), {'up'})
+
+    def test_pedestrian_and_capture_loss_interrupt_reverse(self):
+        wall = np.full_like(self.frame, (65, 110, 95))
+        self.planner.decide(wall, [], 0)
+        self.planner.decide(wall, [], .2)
+        self.assertEqual(self.planner.decide(np.zeros_like(wall), [], .3)[0], set())
+        walker = ('person', 305, 240, 330, 300)
+        self.assertIn('pedestrian', self.planner.decide(wall, [walker], .4)[1])
+        self.assertEqual(self.planner.decide(wall, [walker], .65)[0], set())
