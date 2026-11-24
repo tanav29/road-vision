@@ -122,14 +122,15 @@ def game_lane(frame, tracker=None):
     Returns (offset, overlay), with offset None when both boundaries are not credible.
     """
     h, w = frame.shape[:2]
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    roi_top = int(.55*h)
+    hsv = cv2.cvtColor(frame[roi_top:], cv2.COLOR_BGR2HSV)
     white = cv2.inRange(hsv, (0, 0, 175), (180, 85, 255))
     yellow = cv2.inRange(hsv, (15, 70, 130), (40, 255, 255))
     markings = cv2.bitwise_or(white, yellow)
     edges = cv2.Canny(cv2.GaussianBlur(markings, (5, 5), 0), 50, 150)
     mask = np.zeros_like(edges)
-    cv2.fillPoly(mask, [np.array([(int(.04*w), h-1), (int(.38*w), int(.55*h)),
-                                  (int(.62*w), int(.55*h)), (int(.96*w), h-1)], np.int32)], 255)
+    cv2.fillPoly(mask, [np.array([(int(.04*w), h-roi_top-1), (int(.38*w), 0),
+                                  (int(.62*w), 0), (int(.96*w), h-roi_top-1)], np.int32)], 255)
     lines = cv2.HoughLinesP(cv2.bitwise_and(edges, mask), 1, np.pi/180,
                             threshold=max(15, w//40), minLineLength=max(15, w//25), maxLineGap=w//20)
     sides = [[], []]
@@ -141,6 +142,8 @@ def game_lane(frame, tracker=None):
             dxdy = (x2-x1)/(y2-y1)
             if not .2 < abs(dxdy) < 2.5:
                 continue
+            y1 += roi_top
+            y2 += roi_top
             xb = x1 + (bottom-y1)*dxdy
             xt = x1 + (top-y1)*dxdy
             if dxdy < 0 and -.2*w < xb < .55*w:
@@ -165,8 +168,9 @@ def game_lane(frame, tracker=None):
     # Choose boundaries together: independently selecting the strongest lines can
     # combine a road edge and an unrelated marking into a fictitious lane.
     pairs = []
+    right_clusters = clusters(sides[1])
     for left, left_support in clusters(sides[0]):
-        for right, right_support in clusters(sides[1]):
+        for right, right_support in right_clusters:
             bottom_width = right[0] - left[0]
             top_width = right[1] - left[1]
             if not (.25*w < bottom_width < 1.1*w and 0 < top_width < .75*bottom_width):
@@ -187,7 +191,9 @@ def game_lane(frame, tracker=None):
         cv2.line(overlay, (int(xb), int(bottom)), (int(xt), int(top)), (0, 255, 0), 3)
     center = (left[0] + right[0]) / 2
     cv2.circle(overlay, (int(center), int(bottom)), 6, (0, 255, 255), -1)
-    return (center - w/2)/(w/2), overlay
+    lookahead = (left[1] + right[1]) / 2
+    target = .65 * center + .35 * lookahead
+    return (target - w/2)/(w/2), overlay
 
 
 class LaneTracker:

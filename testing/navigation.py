@@ -1,104 +1,176 @@
-﻿"""Experimental minimap localization and destination picker for the browser game."""
+"""Rotation-aware minimap localization for the GTA screen capture."""
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import time
 
 import cv2
 import numpy as np
 from PIL import ImageGrab
+from selection import select_region
 
 MAP_PATH = Path(__file__).resolve().parent.parent / 'map.webp'
 
 
-def match_minimap(minimap, world):
-    """Return an unverified (x, y, angle, score) candidate, or None.
+class MinimapMatcher:
+    def __init__(self, world):
+        gray = cv2.cvtColor(world, cv2.COLOR_BGR2GRAY)
+        self.roads = (gray < 80).astype(np.float32)
+        self.coarse = cv2.resize(self.roads, None, fx=.5, fy=.5, interpolation=cv2.INTER_AREA)
 
-    The game shows light roads; the supplied map draws roads dark. Matching
-    uses a circular mask to exclude the minimap border and center marker.
-    """
-    h, w = minimap.shape[:2]
-    if min(h, w) < 30:
-        return None
-    size = min(h, w)
-    crop = minimap[(h-size)//2:(h+size)//2, (w-size)//2:(w+size)//2]
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    roads = (gray > 185).astype(np.uint8) * 255
-    yy, xx = np.ogrid[:size, :size]
-    radius = np.sqrt((xx-(size-1)/2)**2 + (yy-(size-1)/2)**2)
-    mask = ((radius < size*.39) & (radius > size*.07)).astype(np.uint8) * 255
-    world_gray = cv2.cvtColor(world, cv2.COLOR_BGR2GRAY)
-    world_roads = (world_gray < 80).astype(np.uint8) * 255
-    best = None
-    for scale in (0.7, 1.0, 1.4, 1.8):
-        side = max(12, round(size * scale))
-        if side >= min(world.shape[:2]):
-            continue
-        template = cv2.resize(roads, (side, side), interpolation=cv2.INTER_NEAREST)
-        scaled_mask = cv2.resize(mask, (side, side), interpolation=cv2.INTER_NEAREST)
-        for angle in range(0, 360, 15):
-            matrix = cv2.getRotationMatrix2D(((side-1)/2, (side-1)/2), angle, 1)
-            rotated = cv2.warpAffine(template, matrix, (side, side), flags=cv2.INTER_NEAREST)
-            rotated_mask = cv2.warpAffine(scaled_mask, matrix, (side, side), flags=cv2.INTER_NEAREST)
-            if cv2.countNonZero(cv2.bitwise_and(rotated, rotated_mask)) < 20:
+    @staticmethod
+    def search(world, template, mask, side, angle):
+        # Zero-mean correlation within the radar ring penalizes solid map features.
+        center = (side - 1) / 2
+        resized = cv2.resize(template, (side, side), interpolation=cv2.INTER_AREA)
+        matrix = cv2.getRotationMatrix2D((center, center), angle, 1)
+        patch = cv2.warpAffine(resized, matrix, (side, side))
+        pixels = mask.sum()
+        kernel = (patch - np.sum(patch * mask) / pixels) * mask
+        energy = np.sum(kernel * kernel)
+        if energy < .005 * pixels:
+            return None
+        return cv2.matchTemplate(world, kernel, cv2.TM_CCORR) / np.sqrt(energy)
+
+    @staticmethod
+    def normalization(world, side):
+        y, x = np.ogrid[:side, :side]
+        r2 = (x-(side-1)/2)**2 + (y-(side-1)/2)**2
+        mask = ((r2 < (.39*side)**2) & (r2 > (.07*side)**2)).astype(np.float32)
+        sums = cv2.matchTemplate(world, mask, cv2.TM_CCORR)
+        squares = cv2.matchTemplate(world * world, mask, cv2.TM_CCORR)
+        variance = squares - sums*sums / mask.sum()
+        return mask, 1 / np.sqrt(np.maximum(variance, .005 * mask.sum()))
+
+    def match(self, minimap):
+        h, w = minimap.shape[:2]
+        size = min(h, w)
+        if size < 30:
+            return None
+        y, x = (h-size)//2, (w-size)//2
+        gray = cv2.cvtColor(minimap[y:y+size, x:x+size], cv2.COLOR_BGR2GRAY)
+        roads = (gray > 185).astype(np.float32)
+        if roads.max() == roads.min():
+            return None
+        peaks = []
+        for scale in (.7, 1., 1.4, 1.8):
+            side = round(size * scale / 2)
+            if side > min(self.coarse.shape):
                 continue
-            result = cv2.matchTemplate(world_roads, rotated, cv2.TM_CCORR_NORMED, mask=rotated_mask)
-            result = np.nan_to_num(result, nan=-1, posinf=-1, neginf=-1)
-            _, score, _, point = cv2.minMaxLoc(result)
-            candidate = (point[0] + side//2, point[1] + side//2, angle, score)
-            if best is None or score > best[3]:
-                best = candidate
-    return best
+            mask, norm = self.normalization(self.coarse, side)
+            for angle in range(0, 360, 10):
+                scores = self.search(self.coarse, roads, mask, side, angle)
+                if scores is None:
+                    continue
+                scores *= norm
+                # Retain a geographically distinct runner-up, even at the same rotation.
+                for _ in range(2):
+                    _, score, _, (px, py) = cv2.minMaxLoc(scores)
+                    peaks.append((score, 2*px+side, 2*py+side, angle, side))
+                    radius = max(4, side//3)
+                    scores[max(0,py-radius):py+radius+1, max(0,px-radius):px+radius+1] = -2
+        if not peaks:
+            return None
+        best, bx, by, angle, coarse_side = max(peaks)
+        if best < .38 or any(score > best-.04 and np.hypot(px-bx, py-by) > coarse_side*.8
+                              for score, px, py, _, _ in peaks):
+            return None
+        # Refine scale, translation and rotation near the winning coarse pose.
+        refined = None
+        for factor in (.92, 1., 1.08):
+            side = round(2*coarse_side*factor)
+            pad = side//2 + 8
+            x0, y0 = max(0,bx-pad), max(0,by-pad)
+            region = self.roads[y0:by+pad+1, x0:bx+pad+1]
+            if min(region.shape) < side:
+                continue
+            mask, norm = self.normalization(region, side)
+            for delta in range(-5, 6):
+                rotation = (angle+delta) % 360
+                scores = self.search(region, roads, mask, side, rotation)
+                if scores is None:
+                    continue
+                _, score, _, (px, py) = cv2.minMaxLoc(scores * norm)
+                candidate = (score, px+x0+side//2, py+y0+side//2, rotation)
+                if refined is None or candidate > refined:
+                    refined = candidate
+        if refined and refined[0] >= .55:
+            score, x, y, rotation = refined
+            return x, y, rotation, score
+
+
+def match_minimap(minimap, world):
+    return MinimapMatcher(world).match(minimap)
+
+
+class MapPreview:
+    window = 'Destination map'
+
+    def __init__(self, game):
+        self.world = cv2.imread(str(MAP_PATH))
+        if self.world is None:
+            raise SystemExit(f'Cannot load map: {MAP_PATH}')
+        print('Select the circular minimap, then press Enter.')
+        self.roi = select_region('Select minimap', game)
+        if not all(self.roi[2:]):
+            raise SystemExit('No minimap selected.')
+        self.matcher = MinimapMatcher(self.world)
+        self.destination = self.candidate = self.future = None
+        self.started = 0
+        cv2.namedWindow(self.window)
+        cv2.setMouseCallback(self.window, self.click)
+        self.worker = ThreadPoolExecutor(max_workers=1)
+
+    def click(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.destination = (x, y)
+
+    def update(self, game):
+        now = time.monotonic()
+        if self.future is not None and self.future.done():
+            self.candidate = self.future.result()
+            self.captured = self.started
+            self.future = None
+        if self.future is None and now-self.started >= .5:
+            x, y, w, h = self.roi
+            self.started = now
+            self.future = self.worker.submit(self.matcher.match, game[y:y+h,x:x+w].copy())
+        display = self.world.copy()
+        label = 'Searching for position'
+        if self.candidate and now-self.captured < 3:
+            x, y, angle, score = self.candidate
+            cv2.circle(display, (x, y), 7, (255, 100, 0), -1)
+            label = f'Match {score:.2f}   radar rotation {angle} deg'
+        if self.destination:
+            cv2.drawMarker(display, self.destination, (0, 0, 255))
+        for color, thickness in [((0,0,0), 3), ((255,255,255), 1)]:
+            cv2.putText(display, label, (10,25), cv2.FONT_HERSHEY_SIMPLEX, .6, color, thickness)
+        cv2.imshow(self.window, display)
+
+    def close(self):
+        self.worker.shutdown(wait=True)
 
 
 def main():
-    world = cv2.imread(str(MAP_PATH))
-    if world is None:
-        raise SystemExit(f'Cannot load map: {MAP_PATH}')
-    screenshot = cv2.cvtColor(np.array(ImageGrab.grab()), cv2.COLOR_RGB2BGR)
-    print('Select the game area, then press Enter. Escape cancels.')
-    gx, gy, gw, gh = cv2.selectROI('Select game area', screenshot, showCrosshair=True)
-    cv2.destroyWindow('Select game area')
-    if not gw or not gh:
+    screenshot = cv2.cvtColor(np.asarray(ImageGrab.grab()), cv2.COLOR_RGB2BGR)
+    print('Select the game area, then press Enter.')
+    x, y, w, h = select_region('Select game area', screenshot)
+    if not w or not h:
         raise SystemExit('No game area selected.')
-    game = screenshot[gy:gy+gh, gx:gx+gw]
-    print('Select the entire circular minimap inside the game area, then press Enter.')
-    mx, my, mw, mh = cv2.selectROI('Select minimap', game, showCrosshair=True)
-    cv2.destroyWindow('Select minimap')
-    if not mw or not mh:
-        raise SystemExit('No minimap selected.')
-    bbox = (gx+mx, gy+my, gx+mx+mw, gy+my+mh)
-    destination = [None]
-    window = 'Destination map - click to set destination; q to quit'
-    cv2.namedWindow(window, cv2.WINDOW_AUTOSIZE)
-
-    def on_mouse(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            destination[0] = (x, y)
-
-    cv2.setMouseCallback(window, on_mouse)
-    print('Click the map to set a destination. The blue position is an unverified candidate.')
+    preview = MapPreview(screenshot[y:y+h,x:x+w])
     try:
         while True:
-            start = time.monotonic()
-            minimap = cv2.cvtColor(np.array(ImageGrab.grab(bbox=bbox)), cv2.COLOR_RGB2BGR)
-            candidate = match_minimap(minimap, world)
-            display = world.copy()
-            if candidate:
-                x, y, angle, score = candidate
-                cv2.circle(display, (x, y), 8, (255, 60, 0), -1)
-                cv2.putText(display, f'UNVERIFIED match {score:.2f}, rotation {angle} deg',
-                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 0, 0), 3)
-                cv2.putText(display, f'UNVERIFIED match {score:.2f}, rotation {angle} deg',
-                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, .55, (255, 255, 255), 1)
-            if destination[0]:
-                cv2.drawMarker(display, destination[0], (0, 0, 255), cv2.MARKER_CROSS, 22, 3)
-            cv2.imshow(window, display)
-            if cv2.waitKey(max(1, int((1 - (time.monotonic()-start))*1000))) & 0xff == ord('q'):
-                break
-            if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+            frame = cv2.cvtColor(np.asarray(ImageGrab.grab(bbox=(x,y,x+w,y+h))), cv2.COLOR_RGB2BGR)
+            preview.update(frame)
+            if cv2.waitKey(50) & 0xff == ord('q') or cv2.getWindowProperty(preview.window, cv2.WND_PROP_VISIBLE) < 1:
                 break
     finally:
+        preview.close()
         cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('\nStopped by Ctrl+C.')
+        raise SystemExit(130)

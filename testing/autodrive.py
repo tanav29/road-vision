@@ -14,12 +14,13 @@ def decide(lane, boxes, width, height, now):
             continue
         # A lower, sufficiently large box intersecting the travel corridor is a hazard.
         if x2 > width * .35 and x1 < width * .65 and y2 > height * .55 and (x2-x1)*(y2-y1) > width*height*.012:
-            return {'down'}, 'OBSTACLE: braking'
+            return ({'down'} if now % .8 < .16 else set()), 'OBSTACLE: brake pulse'
     if lane is None:
         return set(), 'LANE LOST: controls released'
     # Duty cycles keep both speed and steering low without relying on vehicle speed.
-    keys = {'up'} if now % 1.0 < .25 else set()
-    if now % .6 < .12:
+    error = min(abs(lane), 1.)
+    keys = {'up'} if now % 1.0 < .25 - .15*error else set()
+    if now % .6 < .10 + .18*error:
         if lane < -.07:
             keys.add('left')
         elif lane > .07:
@@ -136,8 +137,9 @@ class Controller:
                 self.backend.key(key, False)
                 self.held.remove(key)
             for key in keys - self.held:
-                self.backend.key(key, True)
+                # Track first so cleanup releases the key even if Ctrl+C lands during SendInput.
                 self.held.add(key)
+                self.backend.key(key, True)
             self.held_until = time.monotonic() + .2
             self.last_update = time.monotonic()
             self.reason = reason

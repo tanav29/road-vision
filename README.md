@@ -133,7 +133,7 @@ captured. The model was trained on real driving images, so game graphics and
 third-person views may require tuning and can reduce accuracy. Warnings are based
 on bounding-box size, not measured distance.
 
-The detector defaults to at most 5 frames per second and a 512-pixel inference
+The detector defaults to at most 30 frames per second and a 320-pixel inference
 size to reduce resource use. To adjust them, launch from the project root, for
 example:
 
@@ -302,25 +302,31 @@ For questions, issues, or contributions:
 
 **Built with ❤️ for safer roads and smarter driving**
 
-## For vicecity demo of autodriving
+## Testing GTA Vice City with the rotating minimap
 
-```bash
-.venv\Scripts\python.exe testing\webcam.py --screen --autodrive
+On Windows, open the game on the primary screen, switch to a forward-facing
+in-car view and run this command from the repository root.
+
+```powershell
+.venv\Scripts\python.exe testing\webcam.py --screen --autodrive --map
 ```
 
-### Experimental destination map
+Select the visible game rectangle and press Enter. Inside that still image,
+select a tight square around the entire circular radar and press Enter again.
+The radar can face any direction. Keep both preview windows outside the captured
+area. Click the game and press Ctrl+Alt+G, then release the modifiers to drive.
+Ctrl+Alt+X disarms globally. If you move or resize the game, restart and select
+the two rectangles again.
 
-Run `.venv\Scripts\python.exe testing\navigation.py` from the project root. Select
-first the game area and then the circular minimap within it, pressing Enter after
-both selections. Keep the game visible and stationary on screen. Click the separate
-map window to place or move the red destination marker; press `q` to quit.
+The map preview searches the supplied Vice City map across rotations and zoom
+levels in a background worker. The blue dot marks a recent position estimate.
+?Searching for position? means the matcher has no recent, sufficiently distinct
+match. Sparse roads, HUD icons, and differences between editions can prevent a
+fix. The angle is the rotation used to align the radar with the map. Click the map
+to mark a destination. Driving follows visible lane markings and reacts to detected
+obstacles independently of the marker. Destination routing is still experimental
+work for the future.
 
-The blue dot is an **unverified experimental position candidate**, not a reliable
-location. The matcher searches rotations and several scales, but the game minimap
-and `map.webp` use different styles and the match can be wrong. The displayed score
-is a similarity score, not a probability. Matching currently takes multiple seconds
-on some machines and can make the window temporarily unresponsive. The destination
-is not saved, and no route planning, heading estimation, or destination driving is
-implemented yet. This prototype does not send driving controls. Re-select the
-regions after restarting or moving the game. Live game examples are needed to
-calibrate and validate localization before connecting it to driving.
+For a map-only session run `python testing/navigation.py` in the project
+environment. For detection and localization without sending game keys, use
+`python testing/webcam.py --screen --map`.
