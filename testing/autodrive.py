@@ -1,10 +1,35 @@
 """Conservative, opt-in controls for a Windows browser game only."""
 import ctypes
+from ctypes import wintypes
+import os
 import threading
 import time
 
 KEYS = {'up': 0x57, 'down': 0x53, 'left': 0x41, 'right': 0x44}  # W, S, A, D
 CTRL, ALT, ARM, STOP = 0x11, 0x12, 0x47, 0x58
+
+
+def front_limits(y, width, height, boundaries):
+    """Horizontal limits of the vehicle's forward path at ground-image row y."""
+    depth = min(1., max(.55, y/height))
+    if boundaries is None:
+        half_width = width * (.055 + .24*(depth-.55))
+        return width/2-half_width, width/2+half_width
+    # LaneTracker stores each marking's x at 90% and 62% of image height.
+    t = (depth-.62)/.28
+    left, right = (top + t*(bottom-top) for bottom, top in boundaries)
+    center = (left+right)/2
+    half_width = min(.18*width, max(0., (right-left)*.40))
+    return center-half_width, center+half_width
+
+
+def in_front(x1, x2, y2, width, height, boundaries):
+    if y2 < .55*height:
+        return False
+    left, right = front_limits(y2, width, height, boundaries)
+    # Use the middle half of the box base as the tire/foot contact area.
+    inset = .25*(x2-x1)
+    return x1+inset < right and x2-inset > left and right > left
 
 
 class DrivePlanner:
@@ -22,7 +47,7 @@ class DrivePlanner:
         self.last_frame = None
         self.previous_lane = None
 
-    def decide(self, lane, boxes, width, height, now, adjacent):
+    def decide(self, lane, boxes, width, height, now, adjacent, boundaries=None):
         if self.last_frame is not None and now - self.last_frame > .6:
             self.reset()
         self.last_frame = now
@@ -39,7 +64,7 @@ class DrivePlanner:
             if x2 > .59*width and x1 < .97*width:
                 blocked.add('right')
             area = (x2-x1)*(y2-y1)/(width*height)
-            if x1 < .62*width and x2 > .38*width and area > .004:
+            if area > .004 and in_front(x1, x2, y2, width, height, boundaries):
                 ahead = True
                 urgent |= name == 'person' or (y2 > .72*height and area > .025)
 
@@ -102,17 +127,26 @@ class WindowsKeys:
             raise RuntimeError('Autonomous mode requires Windows.')
         self.user32 = ctypes.windll.user32
         self.user32.GetForegroundWindow.restype = ctypes.c_void_p
-        self.user32.WindowFromPoint.restype = ctypes.c_void_p
+        self.user32.WindowFromPhysicalPoint.argtypes = [wintypes.POINT]
+        self.user32.WindowFromPhysicalPoint.restype = ctypes.c_void_p
+        self.user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
         self.user32.GetAncestor.restype = ctypes.c_void_p
         self.user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
 
     def window_at(self, x, y):
-        class POINT(ctypes.Structure):
-            _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
-        return self.user32.GetAncestor(self.user32.WindowFromPoint(POINT(x, y)), 2)
+        hit = self.user32.WindowFromPhysicalPoint(wintypes.POINT(x, y))
+        return self.user32.GetAncestor(hit, 2)
 
     def foreground(self):
-        return self.user32.GetForegroundWindow()
+        return self.user32.GetAncestor(self.user32.GetForegroundWindow(), 2)
+
+    def capture_target(self, point):
+        window = self.window_at(*point)
+        pid = wintypes.DWORD()
+        self.user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+        if pid.value == os.getpid():
+            return None  # Capture preview or destination map.
+        return window
 
     def pressed(self, key):
         return bool(self.user32.GetAsyncKeyState(key) & 0x8000)
@@ -142,8 +176,9 @@ class WindowsKeys:
 
 
 class Controller:
-    def __init__(self, backend, game_window, timeout=1.5):
-        if not game_window:
+    def __init__(self, backend, game_window=None, timeout=1.5, capture_point=None):
+        self.capture_point = capture_point
+        if not game_window and capture_point is None:
             raise ValueError('Could not identify the game window.')
         self.backend, self.game_window, self.timeout = backend, game_window, timeout
         self.lock = threading.Lock()
@@ -177,15 +212,21 @@ class Controller:
                 if modifiers and self.backend.pressed(STOP):
                     self._stop('STOPPED: Ctrl+Alt+X; Ctrl+Alt+G to re-arm')
                 elif self.armed and self.backend.foreground() != self.game_window:
-                    self._stop('STOPPED: game lost focus')
+                    self._stop('STOPPED: click game, then Ctrl+Alt+G')
                 elif self.armed and time.monotonic() - self.last_update > self.timeout:
                     self._stop('STOPPED: detection timed out')
                 elif self.held and time.monotonic() >= self.held_until:
                     self._release()
-                elif arm and not previous_arm and self.backend.foreground() == self.game_window:
-                    self.armed = True
-                    self.last_update = time.monotonic()
-                    self.reason = 'ARMED: waiting for detection'
+                elif arm and not previous_arm:
+                    target = (self.backend.capture_target(self.capture_point)
+                              if self.capture_point is not None else self.game_window)
+                    if target and self.backend.foreground() == target and self.game_window in (None, target):
+                        self.game_window = target
+                        self.armed = True
+                        self.last_update = time.monotonic()
+                        self.reason = 'ARMED: waiting for detection'
+                    else:
+                        self.reason = 'Move previews aside, click game, then Ctrl+Alt+G'
                 previous_arm = arm
             time.sleep(.02)
 
@@ -194,7 +235,7 @@ class Controller:
             if not self.armed:
                 return self.reason
             if self.backend.foreground() != self.game_window:
-                self._stop('STOPPED: game lost focus')
+                self._stop('STOPPED: click game, then Ctrl+Alt+G')
                 return self.reason
             # Do not send driving keys while the arm shortcut modifiers are held.
             if self.backend.pressed(CTRL) or self.backend.pressed(ALT):

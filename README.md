@@ -161,13 +161,13 @@ when it is already stopped.
 
 2. Select the game rectangle and press Enter. Keep the preview outside that rectangle.
    Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
-   controller state and detected lane boundaries in a resizable, larger preview. The
-processing FPS shown is before the target-rate wait. Both lane boundaries are required;
-   when lanes are missing it releases the driving keys. On a clear straight the controller
-   holds W. It holds a steering correction until the car comes closer to center. When a
-   vehicle persists ahead, it coasts or attempts a lane change toward a visible neighboring
-   lane if the detector sees an opening. A close obstacle takes priority and triggers a
-   short brake input. The forward camera cannot see rear traffic or blind spots. Release Ctrl and Alt after arming before the car can move.
+   controller state and a perspective ribbon. The ribbon spans about 32% of the image
+   at the bumper and tapers to about 7% ahead. It shows the proposed path in green,
+   or the forward corridor in red when yielding. On unmarked pavement the car can
+   drive straight. Edges, surface changes and detected traffic influence which curve
+   it follows. When every sampled path is blocked it releases the throttle. A close
+   obstacle directly ahead triggers a short brake input. Release Ctrl and Alt after
+   arming before the car can move.
 3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only
    while the selected game window has focus. Losing focus or an inference timeout
    also disarms and releases keys. Click the preview and press `q`, close it, or use
@@ -176,8 +176,7 @@ processing FPS shown is before the target-rate wait. Both lane boundaries are re
    a forcibly killed process or system failure cannot guarantee key release. If needed,
    press and release W, A, S and D manually to clear them.
 
-The controller uses screen-space heuristics rather than measured distances; missing
-markings, shadows, HUD elements, unusual roads, and false detections can cause bad
+The controller uses screen-space heuristics rather than measured distances; shadows, HUD elements, unusual roads, and false detections can cause bad
 steering or braking. It has not been calibrated to a particular game installation.
 
 #### 1. Real-time Webcam Processing
@@ -320,12 +319,17 @@ area. Click the game and press Ctrl+Alt+G, then release the modifiers to drive.
 Ctrl+Alt+X disarms globally. If you move or resize the game, restart and select
 the two rectangles again.
 
-The map preview searches the supplied Vice City map across rotations and zoom
-levels in a background worker. The blue dot marks a recent position estimate.
-?Searching for position? means the matcher has no recent, sufficiently distinct
-match. Sparse roads, HUD icons, and differences between editions can prevent a
-fix. The angle is the rotation used to align the radar with the map. Click the map
-to mark a destination. Driving follows visible lane markings and reacts to detected
+The map preview matches radar landmarks against the reference image and searches
+for bright or dark road markings across rotations and zoom levels. After a road
+match it searches near the last position first. The blue dot marks a recent fix.
+If the preview reports similar locations, move toward a distinctive junction. If
+it reports too little detail, check that the selection tightly encloses the radar.
+
+If your edition uses different map artwork, pass a cropped screenshot of its
+full map with `--map-image "C:\path\to\game-map.png"`. This works in either
+`testing/webcam.py --screen` or `testing/navigation.py`. The image becomes
+both the search reference and the displayed map. Click the map
+to mark a destination. Driving follows the selected road ribbon and reacts to detected
 obstacles independently of the marker. Destination routing is still experimental
 work for the future.
 

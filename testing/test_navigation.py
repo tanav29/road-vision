@@ -24,6 +24,33 @@ class NavigationTests(unittest.TestCase):
                 self.assertLessEqual(np.hypot(x-300, y-430), 2)
                 self.assertLessEqual(abs((angle-rotation+180) % 360-180), 3)
 
+    def test_dim_and_dark_roads_on_enlarged_moving_radar(self):
+        world = cv2.imread(str(MAP_PATH))
+        for background, contrast in [(45, 80), (145, -90)]:
+            matcher = MinimapMatcher(world)
+            for i in range(4):
+                x, y = 300 + i, 430
+                crop = matcher.roads[y-50:y+50, x-50:x+50]
+                radar = cv2.resize(np.uint8(background + contrast*crop), (184, 184))
+                angle = 47 + 2*i
+                matrix = cv2.getRotationMatrix2D((91.5, 91.5), -angle, 1)
+                radar = cv2.warpAffine(radar, matrix, (184, 184))
+                result = matcher.match(cv2.cvtColor(radar, cv2.COLOR_GRAY2BGR))
+                self.assertIsNotNone(result)
+                self.assertLessEqual(np.hypot(result[0]-x, result[1]-y), 2)
+            self.assertIsNone(matcher.match(np.zeros((184, 184, 3), np.uint8)))
+            self.assertIsNone(matcher.pose)
+
+    def test_full_color_landmark_fix(self):
+        world = cv2.imread(str(MAP_PATH))
+        matcher = MinimapMatcher(world)
+        crop = cv2.resize(world[380:480, 250:350], (184, 184))
+        transform = cv2.getRotationMatrix2D((91.5, 91.5), -47, 1)
+        fix = matcher.landmark_fix(cv2.warpAffine(crop, transform, (184, 184)))
+        self.assertIsNotNone(fix)
+        self.assertLess(np.hypot(fix[0]-300, fix[1]-430), 2)
+        self.assertLessEqual(abs(fix[2]-47), 3)
+
     def test_repeated_positions_and_empty_radar(self):
         rng = np.random.default_rng(1)
         tile = np.full((100, 100, 3), 255, np.uint8)

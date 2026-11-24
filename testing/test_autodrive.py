@@ -26,6 +26,16 @@ class DrivingTests(unittest.TestCase):
         self.assertEqual(decide(.3, [], 1000, 600, 0)[0], {'up', 'right'})
         self.assertEqual(decide(-.3, [], 1000, 600, 0)[0], {'up', 'left'})
 
+    def test_close_objects_only_trigger_in_projected_lane(self):
+        # At the bottom of the frame the lane bends left of image center.
+        bounds = ((170, 420), (420, 590))
+        for name in ('person', 'car'):
+            for x1, x2, expected in [(397, 595, {'up'}), (210, 340, {'down'})]:
+                planner = DrivePlanner()
+                keys, _ = planner.decide(0, [(name, x1, 290, x2, 540)],
+                                         1000, 600, 0, {}, bounds)
+                self.assertEqual(keys, expected)
+
     def test_synthetic_lane_and_blank(self):
         frame = np.zeros((600, 1000, 3), np.uint8)
         self.assertIsNone(game_lane(frame)[0])
@@ -105,6 +115,34 @@ class DrivingTests(unittest.TestCase):
             time.sleep(.05)
             self.assertFalse(ctl.armed)
             self.assertFalse(ctl.held)
+        finally:
+            ctl.close()
+
+    def test_first_arm_binds_visible_game_and_rearm_retains_target(self):
+        backend = FakeKeys()
+        visible = [None]
+        backend.capture_target = lambda point: visible[0]
+        ctl = Controller(backend, capture_point=(400, 250))
+        def chord():
+            backend.pressed_keys.update({CTRL, ALT, ARM})
+            time.sleep(.06)
+            backend.pressed_keys.clear()
+            time.sleep(.06)
+        try:
+            chord()
+            self.assertFalse(ctl.armed)
+            visible[0] = backend.focus = 2
+            chord()
+            self.assertTrue(ctl.armed)
+            ctl.update({'up'}, 'drive')
+            visible[0] = backend.focus = 3
+            time.sleep(.06)
+            self.assertIn(('up', False), backend.events)
+            chord()
+            self.assertFalse(ctl.armed)
+            visible[0] = backend.focus = 2
+            chord()
+            self.assertTrue(ctl.armed)
         finally:
             ctl.close()
 

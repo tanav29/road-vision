@@ -8,18 +8,22 @@ def main():
 
     import numpy as np
     from ultralytics import YOLO
-    from lane import detect_lanes, game_lane, LaneTracker
-    from autodrive import Controller, WindowsKeys, DrivePlanner
+    from lane import detect_lanes
+    from ribbon import RibbonPlanner
+    from autodrive import Controller, WindowsKeys
     from selection import select_region
 
     parser = argparse.ArgumentParser(description="Run the dashcam detector on a video or a browser game.")
     parser.add_argument("--autodrive", action="store_true", help="Enable experimental Windows game controls (requires --screen)")
+    parser.add_argument("--map-image", type=Path, help="Use this full map image for screen localization")
     parser.add_argument("--map", action="store_true", help="Show rotating minimap localization alongside screen capture")
     parser.add_argument("--screen", action="store_true", help="Select an area of the primary screen to capture")
     parser.add_argument("--video", default="./videos/dashcam3.mp4", help="Video path when not using --screen")
     parser.add_argument("--fps", type=float, default=30.0, help="Maximum inference frames per second (default: 30)")
     parser.add_argument("--imgsz", type=int, default=320, help="YOLO inference image size (default: 320)")
     args = parser.parse_args()
+    if args.map_image:
+        args.map = True
     if args.map and not args.screen:
         parser.error("--map requires --screen")
     if args.autodrive and not args.screen:
@@ -53,19 +57,17 @@ def main():
         if args.autodrive:
             backend = WindowsKeys()
             x1, y1, x2, y2 = screen_region
-            controller = Controller(backend, backend.window_at((x1+x2)//2, (y1+y2)//2))
-            print("Experimental mode: click the game, press Ctrl+Alt+G to arm; Ctrl+Alt+X stops immediately.")
+            capture_point = ((x1+x2)//2, (y1+y2)//2)
             print("Focus loss or a detection timeout also stops and releases all keys.")
 
         colors = {i: tuple(int(c) for c in np.random.default_rng(i).integers(0, 255, 3))
                   for i in model.names}
 
-        planner = DrivePlanner()
-        lane_tracker = LaneTracker()
+        planner = RibbonPlanner()
         window_name = "Smart Dashcam System"
         if args.map:
-            from navigation import MapPreview
-            map_preview = MapPreview(screenshot[y:y+height, x:x+width])
+            from navigation import MAP_PATH, MapPreview
+            map_preview = MapPreview(screenshot[y:y+height, x:x+width], args.map_image or MAP_PATH)
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(window_name, 500, 500)
         while True:
@@ -80,24 +82,28 @@ def main():
             if map_preview:
                 map_preview.update(frame)
 
-            # Lane detection overlay
-            lane_offset, frame_with_lanes = game_lane(frame, lane_tracker) if controller else (None, detect_lanes(frame))
-
             results = model(frame, conf=0.5, imgsz=args.imgsz, verbose=False)
-
-            annotated_frame = frame_with_lanes
-
+            frame_height, frame_width = frame.shape[:2]
             control_boxes = []
             if results[0].boxes is not None:
-                threshold = 800  # Object too close
                 for box in results[0].boxes.cpu():
                     class_id = int(box.cls[0])
+                    control_boxes.append((class_id, *map(int, box.xyxy[0])))
+            if args.autodrive:
+                named_boxes = [(model.names[i], *coords) for i, *coords in control_boxes]
+                keys, action = planner.decide(frame, named_boxes, time.monotonic())
+                annotated_frame = frame.copy()
+                planner.draw(annotated_frame, keys)
+            else:
+                annotated_frame = detect_lanes(frame)
+            if control_boxes:
+                threshold = 800  # Object too close
+                for class_id, x1, y1, x2, y2 in control_boxes:
                     class_name = model.names[class_id]
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    control_boxes.append((str(class_name), x1, y1, x2, y2))
                     box_area = abs((x2 - x1) * (y2 - y1))
-                    frame_height, frame_width = frame.shape[:2]
-                    center_left = int(frame_width * 1 / 3) + 40
+                    relevant = not args.autodrive or planner.intersects(
+                        (class_name, x1, y1, x2, y2), planner.bend, frame_width, frame_height)
+                    center_left = int(frame_width / 3) + 40
                     center_right = int(frame_width * 2 / 3) + 40
                     box_center_x = (x1 + x2) // 2
 
@@ -106,7 +112,8 @@ def main():
                         and box_area > threshold * 10
                         and x2 != x1
                         and abs(y2 - y1) / abs(x2 - x1) > 0.5
-                        and center_left <= box_center_x <= center_right
+                        and relevant
+                        and (args.autodrive or center_left <= box_center_x <= center_right)
                     ):
                         cv2.putText(
                             annotated_frame,
@@ -120,7 +127,7 @@ def main():
                         # if time.time() - last_beep_time > 1:
                         #     threading.Thread(target=beep, daemon=True).start()
                         #     last_beep_time = time.time()
-                    elif class_name == "person" and box_area > threshold * 3:
+                    elif class_name == "person" and relevant and box_area > threshold * 3:
                         cv2.putText(
                             annotated_frame,
                             "PERSON TOO CLOSE!",
@@ -156,8 +163,6 @@ def main():
                     )
 
             if controller:
-                keys, action = planner.decide(lane_offset, control_boxes, frame.shape[1], frame.shape[0],
-                                              time.monotonic(), lane_tracker.adjacent)
                 status = controller.update(keys, action)
                 if status != action:
                     planner.reset()
@@ -178,6 +183,10 @@ def main():
                 break
             if map_preview and cv2.getWindowProperty(map_preview.window, cv2.WND_PROP_VISIBLE) < 1:
                 break
+            if args.autodrive and controller is None:
+                # Show and pump both preview windows before listening for the arm shortcut.
+                controller = Controller(backend, capture_point=capture_point)
+                print("Ready: click the game, then press Ctrl+Alt+G. Ctrl+Alt+X stops.")
 
     finally:
         if controller is not None:
