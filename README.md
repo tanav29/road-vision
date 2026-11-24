@@ -116,6 +116,101 @@ pip install ultralytics opencv-python numpy pandas matplotlib plotly playsound
 
 ### Running the System
 
+#### Vice City AutoDrive crosswalks
+
+Run `.venv\Scripts\python.exe testing\webcam.py --screen --autodrive`, select
+the game view, focus Vice City and press Ctrl+Alt+G to arm. The preview outlines
+detected zebra crossings. A detected pedestrian on a crossing or in the driving
+path triggers a brief S brake pulse and releases throttle and steering. AutoDrive
+waits for 0.8 seconds of clear observations before selecting a path again.
+Ctrl+Alt+X disarms it. AutoDrive pulses W for 120 ms every 400 ms to cruise slowly. A persistent,
+near-uniform view triggers reverse until a traversable road ribbon reappears.
+The screen-based planner has no vehicle-speed telemetry.
+
+#### Standalone crosswalk simulation
+
+Run `python testing/crosswalk.py` from the project root with Python 3.8+.
+It runs a pedestrian crossing, an empty crossing, and a crossing with a parked
+van obscuring the approaching pedestrian. Add `--animate` for a terminal replay.
+
+```sh
+python testing/crosswalk.py --scenario van --speed 8 --delay 0.2 --animate
+python testing/crosswalk.py --scenario van --speed 12 --delay 1
+```
+
+Speed is in metres per second and sensor delay is in seconds, rounded up to
+the next 50 ms simulation tick. The event log gives time, speed, and the car's
+front position relative to the near edge of the crossing (negative is upstream).
+The controller receives delayed synthetic visibility observations. It aims to
+stop two metres before the crossing and accelerates again after observing
+clearance. The simulation checks occupancy and collisions against the actual
+pedestrian position. A failed run exits with code 1. This experiment models a
+single straight lane with fixed braking and runs independently of YOLO and the
+browser game's keyboard controls.
+
+#### Browser game screen capture
+
+1. Open the game in your browser and position it on your primary monitor.
+2. Run `run-browser-game.bat` from the project folder, or run
+   `.venv\Scripts\python.exe testing\webcam.py --screen` from the project root.
+3. Drag a rectangle around the game in the selection window, then press Enter or
+   Space. Press Esc to cancel.
+4. Keep the game visible at the same position and play as usual. Detections appear
+   in a separate OpenCV window; keep that window outside the selected game area.
+   Click the detection window and press `q` to stop. Select the area again after
+   moving or resizing the game.
+
+This captures screen pixels, so another window covering the game will also be
+captured. The model was trained on real driving images, so game graphics and
+third-person views may require tuning and can reduce accuracy. Warnings are based
+on bounding-box size, not measured distance.
+
+The detector defaults to at most 60 frames per second and a 320-pixel inference
+size to reduce resource use. To adjust them, launch from the project root, for
+example:
+
+```powershell
+.venv\Scripts\python.exe testing\webcam.py --screen --fps 3 --imgsz 416
+```
+
+Lower values generally use fewer resources, but can miss fast-moving or small
+objects. Actual frame rate can be lower than the limit if processing takes longer.
+
+#### Experimental Vice City autonomous mode (Windows)
+
+This is an experimental game controller, **not for real vehicles**. It assumes a
+front-facing in-car view and the game's WASD controls (W accelerates, S brakes/reverses, A/D steer). It cannot read speed, detect every obstacle,
+or navigate intersections; the real-road-trained object model may miss game objects.
+Test in a clear area at low speed and be ready to take over. S can reverse the car
+when it is already stopped.
+
+1. Open the browser game on the primary screen, choose the in-car view, and leave it
+   visible. Run from the project root:
+
+   ```powershell
+   .venv\Scripts\python.exe testing\webcam.py --screen --autodrive
+   ```
+
+2. Select the game rectangle and press Enter. Keep the preview outside that rectangle.
+   Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
+   controller state and a perspective ribbon. The ribbon spans about 32% of the image
+   at the bumper and tapers to about 7% ahead. It shows the proposed path in green,
+   or the forward corridor in red when yielding. On unmarked pavement the car can
+   drive straight. Edges, surface changes and detected traffic influence which curve
+   it follows. When every sampled path is blocked it releases the throttle. A close
+   obstacle directly ahead triggers a short brake input. Release Ctrl and Alt after
+   arming before the car can move.
+3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only
+   while the selected game window has focus. Losing focus or an inference timeout
+   also disarms and releases keys. Click the preview and press `q`, close it, or use
+   Ctrl+C to exit. Stop before moving/resizing or covering the capture area; select it
+   again after restarting. The watchdog depends on the Python process and Windows;
+   a forcibly killed process or system failure cannot guarantee key release. If needed,
+   press and release W, A, S and D manually to clear them.
+
+The controller uses screen-space heuristics rather than measured distances; shadows, HUD elements, unusual roads, and false detections can cause bad
+steering or braking. It has not been calibrated to a particular game installation.
+
 #### 1. Real-time Webcam Processing
 
 ```bash
@@ -239,3 +334,37 @@ For questions, issues, or contributions:
 ---
 
 **Built with ❤️ for safer roads and smarter driving**
+
+## Testing GTA Vice City with the rotating minimap
+
+On Windows, open the game on the primary screen, switch to a forward-facing
+in-car view and run this command from the repository root.
+
+```powershell
+.venv\Scripts\python.exe testing\webcam.py --screen --autodrive --map
+```
+
+Select the visible game rectangle and press Enter. Inside that still image,
+select a tight square around the entire circular radar and press Enter again.
+The radar can face any direction. Keep both preview windows outside the captured
+area. Click the game and press Ctrl+Alt+G, then release the modifiers to drive.
+Ctrl+Alt+X disarms globally. If you move or resize the game, restart and select
+the two rectangles again.
+
+The map preview matches radar landmarks against the reference image and searches
+for bright or dark road markings across rotations and zoom levels. After a road
+match it searches near the last position first. The blue dot marks a recent fix.
+If the preview reports similar locations, move toward a distinctive junction. If
+it reports too little detail, check that the selection tightly encloses the radar.
+
+If your edition uses different map artwork, pass a cropped screenshot of its
+full map with `--map-image "C:\path\to\game-map.png"`. This works in either
+`testing/webcam.py --screen` or `testing/navigation.py`. The image becomes
+both the search reference and the displayed map. Click the map
+to mark a destination. Driving follows the selected road ribbon and reacts to detected
+obstacles independently of the marker. Destination routing is still experimental
+work for the future.
+
+For a map-only session run `python testing/navigation.py` in the project
+environment. For detection and localization without sending game keys, use
+`python testing/webcam.py --screen --map`.
