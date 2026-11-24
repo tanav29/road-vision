@@ -9,7 +9,7 @@ def main():
     import numpy as np
     from ultralytics import YOLO
     from lane import detect_lanes, game_lane, LaneTracker
-    from autodrive import Controller, WindowsKeys, decide
+    from autodrive import Controller, WindowsKeys, DrivePlanner
     from selection import select_region
 
     parser = argparse.ArgumentParser(description="Run the dashcam detector on a video or a browser game.")
@@ -60,6 +60,7 @@ def main():
         colors = {i: tuple(int(c) for c in np.random.default_rng(i).integers(0, 255, 3))
                   for i in model.names}
 
+        planner = DrivePlanner()
         lane_tracker = LaneTracker()
         window_name = "Smart Dashcam System"
         if args.map:
@@ -155,8 +156,11 @@ def main():
                     )
 
             if controller:
-                keys, action = decide(lane_offset, control_boxes, frame.shape[1], frame.shape[0], time.monotonic())
+                keys, action = planner.decide(lane_offset, control_boxes, frame.shape[1], frame.shape[0],
+                                              time.monotonic(), lane_tracker.adjacent)
                 status = controller.update(keys, action)
+                if status != action:
+                    planner.reset()
                 cv2.putText(annotated_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                             .65, (0, 255, 255), 2)
 

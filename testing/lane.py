@@ -168,8 +168,9 @@ def game_lane(frame, tracker=None):
     # Choose boundaries together: independently selecting the strongest lines can
     # combine a road edge and an unrelated marking into a fictitious lane.
     pairs = []
+    left_clusters = clusters(sides[0])
     right_clusters = clusters(sides[1])
-    for left, left_support in clusters(sides[0]):
+    for left, left_support in left_clusters:
         for right, right_support in right_clusters:
             bottom_width = right[0] - left[0]
             top_width = right[1] - left[1]
@@ -178,6 +179,10 @@ def game_lane(frame, tracker=None):
             if not (-.1*w < left[1] < 1.1*w and -.1*w < right[1] < 1.1*w):
                 continue
             center_error = abs((left[0] + right[0])/2 - w/2) / w
+            # An interior marking means this pair spans multiple lanes.
+            if any(left[0]+.09*w < line[0] < right[0]-.09*w
+                   for line, _ in left_clusters + right_clusters):
+                continue
             score = (left_support + right_support) / (1 + 3*center_error)
             pairs.append((score, left, right))
     if not pairs:
@@ -187,6 +192,18 @@ def game_lane(frame, tracker=None):
     _, left, right = max(pairs, key=lambda pair: pair[0])
     if tracker is not None:
         left, right = tracker.smooth(left, right, w)
+        tracker.adjacent.clear()
+        lane_width = right[0] - left[0]
+        for side, sign, inner, candidates in (
+                ('left', -1, left, left_clusters), ('right', 1, right, right_clusters)):
+            neighbors = []
+            for outer, _ in candidates:
+                gap = sign * (outer - inner)
+                if .45*lane_width < gap[0] < 1.55*lane_width and .05*gap[0] < gap[1] < .9*gap[0]:
+                    neighbors.append((gap[0], (outer + inner) / 2))
+            if neighbors:
+                _, centerline = min(neighbors, key=lambda item: item[0])
+                tracker.adjacent[side] = (.65*centerline[0] + .35*centerline[1] - w/2)/(w/2)
     for xb, xt in (left, right):
         cv2.line(overlay, (int(xb), int(bottom)), (int(xt), int(top)), (0, 255, 0), 3)
     center = (left[0] + right[0]) / 2
@@ -199,9 +216,11 @@ def game_lane(frame, tracker=None):
 class LaneTracker:
     """Smooth confirmed boundaries; never carry them through a missing detection."""
     def __init__(self):
+        self.adjacent = {}
         self.previous = None
 
     def reset(self):
+        self.adjacent.clear()
         self.previous = None
 
     def smooth(self, left, right, width):

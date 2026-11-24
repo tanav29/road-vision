@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cv2
 import numpy as np
-from autodrive import Controller, decide, CTRL, ALT, ARM, STOP
+from autodrive import Controller, DrivePlanner, decide, CTRL, ALT, ARM, STOP
 from lane import game_lane, LaneTracker
 
 
@@ -44,6 +44,43 @@ class DrivingTests(unittest.TestCase):
         self.assertIsNotNone(tracker.previous)
         self.assertIsNone(game_lane(np.zeros_like(frame), tracker)[0])
         self.assertIsNone(tracker.previous)
+
+    def test_steady_inputs_and_steering_hysteresis(self):
+        planner = DrivePlanner()
+        for tick in range(40):
+            self.assertEqual(planner.decide(.01, [], 1000, 600, tick/30, {})[0], {'up'})
+        for i, offset in enumerate((.11, .08, .055, .085)):
+            self.assertEqual(planner.decide(offset, [], 1000, 600, 1.4+i*.05, {})[0],
+                             {'up', 'right'})
+        self.assertEqual(planner.decide(.02, [], 1000, 600, 1.65, {})[0], {'up'})
+
+    def test_marked_lane_pass_and_abort(self):
+        frame = np.zeros((600, 1000, 3), np.uint8)
+        for start, end in [((310,599),(450,330)), ((690,599),(550,330)), ((990,599),(582,330))]:
+            cv2.line(frame, start, end, (255,255,255), 6)
+        tracker = LaneTracker()
+        offset, _ = game_lane(frame, tracker)
+        self.assertEqual(set(tracker.adjacent), {'right'})
+        planner = DrivePlanner()
+        leader = [('car', 460, 290, 535, 370)]
+        def tick(now, boxes):
+            return planner.decide(offset, boxes, 1000, 600, now, tracker.adjacent)[0]
+        self.assertEqual(tick(0, leader), set())
+        self.assertEqual(tick(.18, leader), {'up', 'right'})
+        self.assertEqual(tick(.24, []), {'up', 'right'})
+        self.assertEqual(tick(.3, leader + [('truck', 700, 320, 880, 510)]), set())
+        self.assertEqual(tick(.4, leader), set())
+        self.assertEqual(tick(.5, [('person', 445, 290, 525, 440)]), {'down'})
+
+    def test_pass_hands_back_to_lane_center_after_crossing(self):
+        planner = DrivePlanner()
+        lead = [('car', 460, 290, 535, 370)]
+        for now in (0., .2):
+            planner.decide(0., lead, 1000, 600, now, {'left': -.44})
+        self.assertEqual(planner.side, 'left')
+        planner.decide(-.24, [], 1000, 600, .3, {'left': -.7})
+        self.assertIsNone(planner.side)
+        self.assertEqual(planner.decide(0., [], 1000, 600, .4, {})[0], {'up'})
 
     def test_watchdog_stop_and_release(self):
         backend = FakeKeys()

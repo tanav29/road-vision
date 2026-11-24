@@ -7,25 +7,93 @@ KEYS = {'up': 0x57, 'down': 0x53, 'left': 0x41, 'right': 0x44}  # W, S, A, D
 CTRL, ALT, ARM, STOP = 0x11, 0x12, 0x47, 0x58
 
 
+class DrivePlanner:
+    """Choose held game keys from consecutive road observations."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.steering = None
+        self.side = None
+        self.ahead_since = None
+        self.started = self.retry_after = self.brake_until = 0.
+        self.braking = False
+        self.last_frame = None
+        self.previous_lane = None
+
+    def decide(self, lane, boxes, width, height, now, adjacent):
+        if self.last_frame is not None and now - self.last_frame > .6:
+            self.reset()
+        self.last_frame = now
+        blocked = set()
+        ahead = urgent = False
+        for name, x1, y1, x2, y2 in boxes:
+            name = name.lower()
+            if name not in {'car', 'truck', 'bus', 'motorcycle', 'motorbike', 'bicycle', 'person'}:
+                continue
+            if y2 < .48*height:
+                continue
+            if x1 < .41*width and x2 > .03*width:
+                blocked.add('left')
+            if x2 > .59*width and x1 < .97*width:
+                blocked.add('right')
+            area = (x2-x1)*(y2-y1)/(width*height)
+            if x1 < .62*width and x2 > .38*width and area > .004:
+                ahead = True
+                urgent |= name == 'person' or (y2 > .72*height and area > .025)
+
+        if urgent and not self.braking:
+            self.brake_until = now + .18
+        self.braking = urgent
+        if urgent or lane is None:
+            self.side = self.steering = self.ahead_since = self.previous_lane = None
+            if urgent:
+                self.retry_after = now + .6
+                return ({'down'} if now < self.brake_until else set()), 'OBSTACLE: yielding'
+            return set(), 'LANE LOST: controls released'
+
+        if not ahead:
+            self.ahead_since = None
+        elif self.ahead_since is None:
+            self.ahead_since = now
+
+        if self.side:
+            # When straddling the divider, the detected current lane switches
+            # to the destination lane. Hand steering back to its centerline.
+            sign = -1 if self.side == 'left' else 1
+            crossed = (lane - self.previous_lane)*sign > .16
+            if crossed or self.side in blocked or self.side not in adjacent or now-self.started > 1.6:
+                self.side = self.steering = None
+                self.retry_after = now + 1.5
+        self.previous_lane = lane
+        if (self.side is None and self.ahead_since is not None
+                and now-self.ahead_since >= .15 and now >= self.retry_after):
+            available = [side for side in adjacent if side not in blocked]
+            if available:
+                self.side = min(available, key=lambda side: abs(adjacent[side]))
+                self.started = now
+
+        target = adjacent[self.side] if self.side else lane
+        # Separate engagement and release thresholds avoid key chatter near center.
+        if target > .09:
+            self.steering = 'right'
+        elif target < -.09:
+            self.steering = 'left'
+        elif ((self.steering == 'right' and target < .035)
+              or (self.steering == 'left' and target > -.035)):
+            self.steering = None
+        keys = {self.steering} if self.steering else set()
+        if self.side or (not ahead and abs(target) < .42):
+            keys.add('up')
+        if self.side:
+            return keys, f'CHANGING LANE: {self.side}'
+        return keys, 'TRAFFIC: coasting' if ahead else 'DRIVING'
+
+
 def decide(lane, boxes, width, height, now):
-    """Return keys for one control tick; bounding boxes are (class, x1, y1, x2, y2)."""
-    for name, x1, y1, x2, y2 in boxes:
-        if name.lower() not in {'car', 'truck', 'bus', 'motorcycle', 'motorbike', 'bicycle', 'person'}:
-            continue
-        # A lower, sufficiently large box intersecting the travel corridor is a hazard.
-        if x2 > width * .35 and x1 < width * .65 and y2 > height * .55 and (x2-x1)*(y2-y1) > width*height*.012:
-            return ({'down'} if now % .8 < .16 else set()), 'OBSTACLE: brake pulse'
-    if lane is None:
-        return set(), 'LANE LOST: controls released'
-    # Duty cycles keep both speed and steering low without relying on vehicle speed.
-    error = min(abs(lane), 1.)
-    keys = {'up'} if now % 1.0 < .25 - .15*error else set()
-    if now % .6 < .10 + .18*error:
-        if lane < -.07:
-            keys.add('left')
-        elif lane > .07:
-            keys.add('right')
-    return keys, 'DRIVING'
+    """Single-frame decision for callers without a lane tracker."""
+    return DrivePlanner().decide(lane, boxes, width, height, now, {})
 
 
 class WindowsKeys:

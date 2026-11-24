@@ -163,9 +163,11 @@ when it is already stopped.
    Click the game to focus it, then press **Ctrl+Alt+G** to arm. The preview displays the
    controller state and detected lane boundaries in a resizable, larger preview. The
 processing FPS shown is before the target-rate wait. Both lane boundaries are required;
-   when lanes are missing it releases the driving keys. When a large vehicle/person
-   is detected ahead it applies short brake pulses. Steering and acceleration are
-   also pulsed. Release Ctrl and Alt after arming before the car can move.
+   when lanes are missing it releases the driving keys. On a clear straight the controller
+   holds W. It holds a steering correction until the car comes closer to center. When a
+   vehicle persists ahead, it coasts or attempts a lane change toward a visible neighboring
+   lane if the detector sees an opening. A close obstacle takes priority and triggers a
+   short brake input. The forward camera cannot see rear traffic or blind spots. Release Ctrl and Alt after arming before the car can move.
 3. Press **Ctrl+Alt+X globally** to immediately disarm and release the keys. Ctrl+Alt+G re-arms only
    while the selected game window has focus. Losing focus or an inference timeout
    also disarms and releases keys. Click the preview and press `q`, close it, or use
